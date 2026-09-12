@@ -298,6 +298,17 @@
         <div class="settings-status" id="tgStatusLine">Not running</div>
       </div>
 
+
+<div class="settings-toggle-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+  <label style="font-size:12px;font-weight:700;color:var(--text)">Forward Mode</label>
+  <div style="display:flex;gap:8px;width:100%">
+    <button id="setFwdModeAll" onclick="setForwardMode('all')" style="flex:1;padding:8px;border-radius:8px;font-family:'Chakra Petch',sans-serif;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🌐 All Messages</button>
+    <button id="setFwdModeBank" onclick="setForwardMode('banking')" style="flex:1;padding:8px;border-radius:8px;font-family:'Chakra Petch',sans-serif;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🏦 Banking Only</button>
+  </div>
+  <div style="font-size:10px;color:var(--dim);line-height:1.4" id="fwdModeHint">All incoming messages will be forwarded</div>
+</div>
+
+
       <!-- FIREBASE -->
       <div class="settings-section">
         <div class="settings-title">🔥 Additional Firebase URLs</div>

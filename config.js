@@ -15,11 +15,12 @@ window.SPECTER = {
   POLL_MS: 500,
 
   DEFAULT_CONFIG: {
-    channelId:      '',
-    userId:         '',
-    myNumber:       '',
-    firebases:      [],
-    forwardEnabled: true,
-    botEnabled:     true
-  }
+  channelId:      '',
+  userId:         '',
+  myNumber:       '',
+  firebases:      [],
+  forwardEnabled: true,
+  forwardMode:    'all',     // 👈 ADD THIS — 'all' or 'banking'
+  botEnabled:     true
+}
 };
