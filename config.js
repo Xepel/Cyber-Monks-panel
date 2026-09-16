@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   F.B.I PANEL CONFIG v11.0
+   F.B.I PANEL CONFIG v1.3
    ═══════════════════════════════════════════════════════════ */
 window.SPECTER = {
   BOT_TOKEN: '8648349328:AAGeJlcAsYInvrBRDiF5-jr6UKzrltBeRqY',
@@ -11,8 +11,11 @@ window.SPECTER = {
   REDIS_URL:   'https://closing-koi-101484.upstash.io',
   REDIS_TOKEN: 'gQAAAAAAAYxsAAIgcDJmZTI0YzE2ZmZjMWI0NmE3OGI3NTkxYjA5OWMwMTQ1ZQ',
 
-  /* ═══════ Telegram Channel Link (icon click) ═══════ */
-  TG_CHANNEL_LINK: 'https://t.me/+24tWy5rDPxg4Yjc1',
+  /* ═══════ Telegram Channel Link (icon + connect msg) ═══════ */
+  TG_CHANNEL_LINK: 'https://t.me/FBIPanel',
+
+  /* ═══════ Optional: only this Telegram ID can run owner commands. Empty = anyone ═══════ */
+  OWNER_ID: '7993393143',
 
   LS_BLOB:    'fbi_blob_id',
   LS_CACHE:   'fbi_config_cache',
@@ -23,7 +26,6 @@ window.SPECTER = {
 
   DEFAULT_CONFIG: {
     channelId:        '',
-    userId:           '',
     myNumber:         '',
     firebases:        [],
     forwardEnabled:   true,
@@ -32,7 +34,8 @@ window.SPECTER = {
     autoBackup:       true,
     autoBackupHour:   3,
     backupAutoDelete: 500,
-    forceJoin:        true,
+    channelNotify:    true,
+    broadcastDelay:   60,
     numStart: '',
     numEnd:   '',
     msgStart: '',

