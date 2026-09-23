@@ -6,9 +6,8 @@
 <title>F.B.I PANEL — Sakura Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Orbitron:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Orbitron:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" media="print" onload="this.media='all'">
 <link rel="stylesheet" href="style.css"/>
-<script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 </head>
 <body>
 
@@ -35,7 +34,7 @@
     <div class="setup-sub">Connect your Firebase database to unlock the F.B.I command center.</div>
     <label class="fl">Firebase Database URL</label>
     <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
-    <button type="button" class="cta" onclick="connect()">⚡ Connect to Firebase →</button>
+    <button type="button" class="cta" onclick="safeConnect(event)">⚡ Connect to Firebase →</button>
     <div class="s-err" id="serr">Connection failed — check URL and key</div>
     <div class="s-footer"><span class="gold-grad">F.B.I PANEL • SAKURA EDITION</span></div>
   </div>
@@ -358,7 +357,33 @@
 <div class="captured-bar" id="capturedBar"></div>
 <div class="toast" id="toastEl"></div>
 
-<script src="config.js" defer></script>
-<script src="script.js" defer></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   Telegram WebApp — NON-BLOCKING background load
+   Panel loads first; Telegram features activate when ready.
+   ═══════════════════════════════════════════════════════════ */
+(function(){
+  function loadTelegram(){
+    var s = document.createElement('script');
+    s.src = 'https://telegram.org/js/telegram-web-app.js';
+    s.async = true;
+    s.onload = function(){
+      try{
+        if(window.Telegram && window.Telegram.WebApp){
+          window.Telegram.WebApp.ready();
+          window.Telegram.WebApp.expand();
+          if(typeof initTelegramWebApp === 'function') initTelegramWebApp();
+        }
+      }catch(e){}
+    };
+    s.onerror = function(){ console.warn('[Telegram] script load failed — panel works without it'); };
+    document.head.appendChild(s);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadTelegram);
+  else loadTelegram();
+})();
+</script>
 </body>
 </html>

