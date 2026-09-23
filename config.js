@@ -17,7 +17,7 @@ window.SPECTER = {
   RK_PREFIX:  '_c1_',            // per-user key prefix
 
   TG_CHANNEL_LINK: 'https://t.me/FBIPanel',
-  OWNER_ID: '7641491740',
+  OWNER_ID: '7993393143',
 
   LS_BLOB:    'fbi_blob_id',
   LS_CACHE:   'fbi_config_cache',
