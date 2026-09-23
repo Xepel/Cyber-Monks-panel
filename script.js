@@ -2167,15 +2167,42 @@ function _cleanPhone(n){
   if(n.length > 10) n = n.slice(-10);
   return n;
 }
+
+
 function _extractBetween(text, startTag, endTag){
   if(!startTag) return null;
   var tag = String(startTag).trim(); if(!tag) return null;
   var lowerT = text.toLowerCase(), lowerTag = tag.toLowerCase();
   var sIdx = lowerT.indexOf(lowerTag);
   if(sIdx === -1){
-    var cleanTag = tag.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim().toLowerCase();
+    /* Safe emoji strip — surrogate-aware, works in ALL browsers */
+    var cleanTag = tag.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/g, '').trim().toLowerCase();
     if(cleanTag && cleanTag !== lowerTag){ sIdx = lowerT.indexOf(cleanTag); if(sIdx !== -1) lowerTag = cleanTag; }
   }
+  if(sIdx === -1) return null;
+  var startPos = sIdx + lowerTag.length;
+  while(startPos < text.length && /[\s:]/.test(text.charAt(startPos))) startPos++;
+  var out;
+  if(!endTag || !String(endTag).trim()){ out = text.substring(startPos); }
+  else {
+    var eTag = String(endTag).trim().toLowerCase();
+    var eIdx = lowerT.indexOf(eTag, startPos);
+    if(eIdx === -1){
+      var cleanEnd = eTag.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/g, '').trim();
+      if(cleanEnd) eIdx = lowerT.indexOf(cleanEnd, startPos);
+    }
+    if(eIdx === -1) return null;
+    out = text.substring(startPos, eIdx);
+  }
+  return String(out).trim();
+}
+
+
+
+
+
+
+
   if(sIdx === -1) return null;
   var startPos = sIdx + lowerTag.length;
   while(startPos < text.length && /[\s:]/.test(text.charAt(startPos))) startPos++;
@@ -2208,11 +2235,14 @@ function parseTelegramMessage(text){
       var msgRaw = _extractBetween(text, userConfig.msgStart, userConfig.msgEnd);
       if(msgRaw && msgRaw.length >= 1) message = msgRaw;
     }
+
     if(message){
-      message = message.replace(/<\/?[a-z]+>/gi, '').trim();
-      var cutC = message.search(/\n\s*(?:Sent at|Time|Date|Status|SIM|Package|Timestamp|From|Received at|Click on)\s*:/i);
-      if(cutC > 0) message = message.substring(0, cutC).trim();
+      message = message.replace(/<\/?[a-z]+>/gi, '');
+      message = message.replace(/^[\s\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]+/, '').trim();
+      var cut = message.search(/\n\s*(?:Sent at|Time|Date|Status|SIM|Package|Timestamp|From|Received at|Click on)\s*:/i);
+      if(cut > 0) message = message.substring(0, cut).trim();
     }
+
     if(number && message) return { number: number, message: message, valid: true };
   }
 
@@ -2436,6 +2466,10 @@ async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
    📝 BUILD TEXT REPORT — human readable
    ═══════════════════════════════════════════════════════════════ */
 function _buildBackupText(data){
+  function repeat_(ch, n){ var s = ''; for(var i=0;i<n;i++) s += ch; return s; }
+  function line(t){ L.push(t); }
+  function blank(){ L.push(''); }
+
   var L = [];
   var W = 62;
   var sep = repeat_('━', W);
