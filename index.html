@@ -357,8 +357,31 @@
 <div class="captured-bar" id="capturedBar"></div>
 <div class="toast" id="toastEl"></div>
 
-<script src="config.js"></script>
-<script src="script.js"></script>
+<script>
+(function(){
+  function boot(){
+    fetch('/api/config', { cache: 'no-store' })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(cfg){ window.SPECTER = cfg; })
+      .catch(function(err){
+        console.error('[Config] Load failed — run: npm start', err);
+        window.SPECTER = window.SPECTER || { DEFAULT_CONFIG: {} };
+        var se = document.getElementById('serr');
+        if(se){
+          se.textContent = 'Start server: npm install && npm start (config from .env)';
+          se.style.display = 'block';
+        }
+      })
+      .finally(function(){
+        var s = document.createElement('script');
+        s.src = 'script.js';
+        document.body.appendChild(s);
+      });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
 <script>
 /* ═══════════════════════════════════════════════════════════
    Telegram WebApp — NON-BLOCKING background load
