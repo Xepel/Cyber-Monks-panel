@@ -2,9 +2,10 @@
   "name": "fbi-panel",
   "private": true,
   "version": "14.0.0",
-  "description": "F.B.I Panel — run with npm start so secrets load from .env",
+  "description": "F.B.I Panel — Vercel (serverless) or local npm start",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

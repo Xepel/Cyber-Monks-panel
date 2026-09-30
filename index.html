@@ -360,15 +360,15 @@
 <script>
 (function(){
   function boot(){
-    fetch('/api/config', { cache: 'no-store' })
+    fetch('/api/config', { cache: 'no-store', credentials: 'same-origin' })
       .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(cfg){ window.SPECTER = cfg; })
       .catch(function(err){
-        console.error('[Config] Load failed — run: npm start', err);
-        window.SPECTER = window.SPECTER || { DEFAULT_CONFIG: {} };
+        console.error('[Config] /api/config failed', err);
+        window.SPECTER = { DEFAULT_CONFIG: {} };
         var se = document.getElementById('serr');
         if(se){
-          se.textContent = 'Start server: npm install && npm start (config from .env)';
+          se.textContent = 'Backend API not ready. Vercel: add env vars (BOT_TOKEN, REDIS_URL, REDIS_TOKEN, CLOAK, OWNER_ID) in Project Settings → Environment Variables, then Redeploy. Local: npm start';
           se.style.display = 'block';
         }
       })

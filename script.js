@@ -91,6 +91,7 @@ function _updateFilterUI(){
 /* ═══════ UTILS ═══════ */
 function _fastFetch(url, opts){
   opts = opts || {};
+  if(String(url).indexOf('/api/') === 0 && !opts.credentials) opts.credentials = 'same-origin';
   if(!opts.signal){ try{ opts.signal = AbortSignal.timeout(20000); }catch(e){} }
   return fetch(url, opts);
 }

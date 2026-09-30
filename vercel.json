@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 60
+    }
+  },
+  "redirects": [
+    { "source": "/.env", "destination": "/404", "statusCode": 404 },
+    { "source": "/.env.example", "destination": "/404", "statusCode": 404 },
+    { "source": "/server.js", "destination": "/404", "statusCode": 404 },
+    { "source": "/lib/:path*", "destination": "/404", "statusCode": 404 }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}

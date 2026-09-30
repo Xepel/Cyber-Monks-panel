@@ -1,33 +1,12 @@
 'use strict';
 
 require('dotenv').config();
-var crypto = require('crypto');
 var express = require('express');
 var path = require('path');
 
 var app = express();
-var panelSessions = new Map();
-
-function parseCookies(header){
-  var out = {};
-  if(!header) return out;
-  header.split(';').forEach(function(part){
-    var i = part.indexOf('=');
-    if(i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
-  });
-  return out;
-}
-
-function requirePanelSession(req, res, next){
-  var cookies = parseCookies(req.headers.cookie);
-  var sid = cookies.panel_sid;
-  var now = Date.now();
-  if(sid && panelSessions.has(sid) && panelSessions.get(sid) > now) return next();
-  sid = crypto.randomBytes(24).toString('hex');
-  panelSessions.set(sid, now + 86400000);
-  res.setHeader('Set-Cookie', 'panel_sid=' + sid + '; Path=/; HttpOnly; SameSite=Lax');
-  next();
-}
+var sessionMod = require('./lib/session');
+var requirePanelSession = sessionMod.ensurePanelSession;
 var PORT = parseInt(process.env.PORT || '3000', 10);
 
 var DEFAULT_CONFIG = {
