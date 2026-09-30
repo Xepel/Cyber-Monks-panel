@@ -365,7 +365,13 @@
       .then(function(cfg){ window.SPECTER = cfg; })
       .catch(function(err){
         console.error('[Config] /api/config failed', err);
-        window.SPECTER = { DEFAULT_CONFIG: {} };
+        window.SPECTER = {
+          DEFAULT_CONFIG: {},
+          BLOB_BASE: '/api/blob',
+          LS_BLOB: 'fbi_blob_id',
+          LS_CACHE: 'fbi_config_cache',
+          serverTelegramBot: false
+        };
         var se = document.getElementById('serr');
         if(se){
           se.textContent = 'Backend API not ready. Vercel: add env vars (BOT_TOKEN, REDIS_URL, REDIS_TOKEN, CLOAK, OWNER_ID) in Project Settings → Environment Variables, then Redeploy. Local: npm start';
@@ -374,7 +380,8 @@
       })
       .finally(function(){
         var s = document.createElement('script');
-        s.src = 'script.js';
+        var local = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+        s.src = local ? 'script.src.js' : 'script.js?v=1';
         document.body.appendChild(s);
       });
   }

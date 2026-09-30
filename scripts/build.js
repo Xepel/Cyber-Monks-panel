@@ -4,22 +4,21 @@ var fs = require('fs');
 var path = require('path');
 
 var root = path.join(__dirname, '..');
-var src = path.join(root, 'script.js');
+var src = path.join(root, 'script.src.js');
 var out = path.join(root, 'script.js');
 
+if(!fs.existsSync(src)){
+  console.error('[build] missing script.src.js');
+  process.exit(1);
+}
+
 if(process.env.SKIP_OBFUSCATE === '1'){
-  console.log('[build] SKIP_OBFUSCATE=1 — script left readable');
+  fs.copyFileSync(src, out);
+  console.log('[build] SKIP_OBFUSCATE=1 — copied script.src.js → script.js');
   process.exit(0);
 }
 
-var JavaScriptObfuscator;
-try{
-  JavaScriptObfuscator = require('javascript-obfuscator');
-}catch(e){
-  console.warn('[build] javascript-obfuscator not installed — run npm install');
-  process.exit(0);
-}
-
+var JavaScriptObfuscator = require('javascript-obfuscator');
 var code = fs.readFileSync(src, 'utf8');
 var result = JavaScriptObfuscator.obfuscate(code, {
   compact: true,
@@ -27,15 +26,21 @@ var result = JavaScriptObfuscator.obfuscate(code, {
   stringArray: true,
   stringArrayRotate: true,
   stringArrayShuffle: true,
-  stringArrayThreshold: 0.75,
+  stringArrayThreshold: 0.85,
+  stringArrayEncoding: ['base64'],
+  splitStrings: true,
+  splitStringsChunkLength: 8,
   unicodeEscapeSequence: false,
-  controlFlowFlattening: false,
+  controlFlowFlattening: true,
+  controlFlowFlatteningThreshold: 0.4,
   deadCodeInjection: false,
   debugProtection: false,
   disableConsoleOutput: false,
   renameGlobals: false,
+  identifierNamesGenerator: 'hexadecimal',
   target: 'browser'
 });
 
 fs.writeFileSync(out, result.getObfuscatedCode(), 'utf8');
-console.log('[build] script.js obfuscated for production deploy');
+var kb = Math.round(fs.statSync(out).size / 1024);
+console.log('[build] obfuscated script.src.js → script.js (' + kb + ' KB)');
