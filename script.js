@@ -453,7 +453,12 @@ requestAnimationFrame(function(){
 });
 
 window.addEventListener('error', function(e){
-  console.warn('[Panel Error]', e.message);
+  var src = String(e.filename || e.target && e.target.src || '');
+  if(/contentscript|chrome-extension|moz-extension|injected\.js/i.test(src)) return;
+  var msg = e.message || (e.error && e.error.message) || '';
+  if(!msg && e.target && e.target.tagName === 'SCRIPT') msg = 'script failed to load';
+  if(!msg) return;
+  console.warn('[Panel Error]', msg);
 }, true);
 
 window.addEventListener('beforeunload', function(){
@@ -613,8 +618,16 @@ async function createCloudBlob(){
       body: JSON.stringify(userConfig)
     });
     if(!r.ok) return;
-    var loc = r.headers.get('Location') || r.headers.get('location');
-    if(loc){ var parts = loc.split('/'); blobId = parts[parts.length-1]; localStorage.setItem(CFG.LS_BLOB, blobId); updateCloudStatus('☁ Created'); }
+    var newId = '';
+    try{
+      var j = await r.json();
+      if(j && j.id) newId = String(j.id);
+    }catch(e2){}
+    if(!newId){
+      var loc = r.headers.get('Location') || r.headers.get('location');
+      if(loc){ var parts = loc.split('/'); newId = parts[parts.length - 1]; }
+    }
+    if(newId){ blobId = newId; localStorage.setItem(CFG.LS_BLOB, blobId); updateCloudStatus('☁ Created'); }
   }catch(e){ updateCloudStatus('⚠ Unavailable'); }
 }
 function cacheConfigLocal(){ try{ localStorage.setItem(CFG.LS_CACHE, JSON.stringify(userConfig)); }catch(e){} }

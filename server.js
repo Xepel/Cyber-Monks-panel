@@ -38,7 +38,7 @@ app.use(express.json({ limit: '32mb' }));
 
 function buildPublicConfig(){
   return {
-    BLOB_BASE: process.env.BLOB_BASE || 'https://jsonblob.com/api/jsonBlob',
+    BLOB_BASE: '/api/blob',
     TG_CHANNEL_LINK: process.env.TG_CHANNEL_LINK || '',
     LS_BLOB: process.env.LS_BLOB || 'fbi_blob_id',
     LS_CACHE: process.env.LS_CACHE || 'fbi_config_cache',
@@ -299,6 +299,26 @@ async function redisCmdVault(actorUid, cmd){
 app.get('/api/config', function(_req, res){
   res.setHeader('Cache-Control', 'no-store');
   res.json(buildPublicConfig());
+});
+
+var blobProxy = require('./lib/blob-proxy');
+
+app.post('/api/blob', requirePanelSession, async function(req, res){
+  var out = await blobProxy.blobCreate(req.body);
+  if(!out.ok) return res.status(out.status || 502).json({ ok: false });
+  res.status(201).json({ ok: true, id: out.id });
+});
+
+app.get('/api/blob/:id', requirePanelSession, async function(req, res){
+  var out = await blobProxy.blobGet(req.params.id);
+  if(!out.ok) return res.status(out.status || 502).json({ ok: false });
+  res.json(out.data != null ? out.data : {});
+});
+
+app.put('/api/blob/:id', requirePanelSession, async function(req, res){
+  var out = await blobProxy.blobPut(req.params.id, req.body);
+  if(!out.ok) return res.status(out.status || 502).json({ ok: false });
+  res.json({ ok: true });
 });
 
 app.use('/api/panel', requirePanelSession);
