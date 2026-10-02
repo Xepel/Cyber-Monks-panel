@@ -191,6 +191,7 @@
             </div>
             <label class="fl">Message</label>
             <textarea id="dmSendMsg" class="sarea" placeholder="Type your message..."></textarea>
+            <button type="button" class="sbtn" style="margin-bottom:8px;background:rgba(255,200,80,.12);border:1px solid rgba(255,200,80,.35);font-size:11px" onclick="setPreferredSmsDeviceFromModal()">⭐ Use this device for SMS</button>
             <button class="sbtn" id="dmSendBtn" onclick="sendSmsActive()">🚀 Send Message</button>
             <div class="sres" id="dmSendRes"></div>
           </div>
@@ -253,6 +254,12 @@
         <div class="settings-title">📞 My Number (Forward Target)</div>
         <div class="settings-desc">All incoming messages on the active device will be forwarded to this number via SMS.</div>
         <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">📱 SMS sender device ID</div>
+        <div class="settings-desc">Telegram capture / auto-send isi device se jayega (jo phone par SMS deliver karta ho). Example: <code style="color:var(--gold2)">2f3e0fd1c55e12ab</code></div>
+        <input class="fi" id="setSmsDeviceId" placeholder="device id (clients/…)" autocomplete="off"/>
       </div>
 
       <div class="settings-section">
