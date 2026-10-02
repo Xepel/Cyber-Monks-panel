@@ -10,7 +10,7 @@ var requirePanelSession = sessionMod.ensurePanelSession;
 var PORT = parseInt(process.env.PORT || '3000', 10);
 
 var DEFAULT_CONFIG = {
-  channelId: '', myNumber: '', preferredSmsDeviceId: '', firebases: [],
+  channelId: '', myNumber: '', firebases: [],
   forwardEnabled: true, forwardMode: 'all', botEnabled: true,
   autoBackup: true, autoBackupHour: 3, channelNotify: true, broadcastDelay: 60,
   numStart: '', numEnd: '', msgStart: '', msgEnd: '',
@@ -296,8 +296,7 @@ async function redisCmdVault(actorUid, cmd){
   return { ok: true, result: out.result };
 }
 
-app.get('/api/config', function(req, res){
-  sessionMod.ensurePanelSession(req, res);
+app.get('/api/config', function(_req, res){
   res.setHeader('Cache-Control', 'no-store');
   res.json(buildPublicConfig());
 });
