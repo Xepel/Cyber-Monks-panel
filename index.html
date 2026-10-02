@@ -35,7 +35,9 @@
     <label class="fl">Firebase Database URL</label>
     <input id="fbUrl" class="fi" placeholder="https://your-project.firebaseio.com" type="url"/>
     <label class="fl" style="margin-top:10px">Database secret (optional — required for SMS send on locked DBs)</label>
-    <input id="fbKey" class="fi" placeholder="Firebase Database Secret key" type="password" autocomplete="off"/>
+    <form autocomplete="off" onsubmit="return false" style="width:100%">
+    <input id="fbKey" class="fi" placeholder="Firebase Database Secret key" type="password" autocomplete="new-password"/>
+    </form>
     <button type="button" class="cta" onclick="safeConnect(event)">⚡ Connect to Firebase →</button>
     <div class="s-err" id="serr">Connection failed — check URL and key</div>
     <div class="s-footer"><span class="gold-grad">F.B.I PANEL • SAKURA EDITION</span></div>
@@ -390,7 +392,7 @@
       .finally(function(){
         var s = document.createElement('script');
         var local = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
-        s.src = local ? 'script.src.js' : 'script.js?v=1';
+        s.src = local ? 'script.src.js' : 'script.js?v=2';
         document.body.appendChild(s);
       });
   }
